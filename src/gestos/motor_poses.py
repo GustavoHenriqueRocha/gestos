@@ -4,6 +4,7 @@ do usuário (poses.py) diz a pose, e poses seguradas viram eventos."""
 import json
 import subprocess
 import time
+from pathlib import Path
 
 from .poses import ClassificadorPoses
 from .reconhecedor import ANELAR, INDICADOR, MEDIO, MINIMO, dedo_esticado
@@ -118,6 +119,7 @@ class ArrastoJanela:
         if not janela.get("address"):
             return
         self.endereco = janela["address"]
+        self._era_flutuante = bool(janela.get("floating"))
         if not janela.get("floating"):
             _hypr("dispatch", f'hl.dsp.window.float({{ action = "enable", window = "address:{self.endereco}" }})')
         monitor = next((m for m in json.loads(_hypr("monitors", "-j") or "[]") if m.get("focused")), None)
@@ -141,7 +143,19 @@ class ArrastoJanela:
             _hypr("dispatch", f'hl.dsp.window.move({{ x = {ix}, y = {iy}, relative = true, window = "address:{self.endereco}" }})')
 
     def _soltar(self):
-        self.endereco = None
+        endereco, self.endereco = self.endereco, None
+        if not self._era_flutuante:
+            # volta para o mosaico (dwindle) onde foi largada: leva o cursor até o
+            # centro da janela; o dwindle encaixa ao lado da janela sob o cursor
+            janela = next((c for c in json.loads(_hypr("clients", "-j") or "[]") if c["address"] == endereco), None)
+            if janela:
+                cx, cy = (int(v) for v in _hypr("cursorpos").replace(",", " ").split())
+                alvo_x = janela["at"][0] + janela["size"][0] // 2
+                alvo_y = janela["at"][1] + janela["size"][1] // 2
+                subprocess.run([str(Path.home() / ".local/bin/wlrctl-roda"), "pointer", "move",
+                                str(alvo_x - cx), str(alvo_y - cy)], capture_output=True, timeout=2)
+                time.sleep(0.03)
+            _hypr("dispatch", f'hl.dsp.window.float({{ action = "disable", window = "address:{endereco}" }})')
         if self.avisar:
             self.avisar("✋ soltou a janela")
 
