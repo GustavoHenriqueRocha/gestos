@@ -25,11 +25,12 @@ altura = 480
 [ajustes]
 notificar = true
 
+# 👍 liga/desliga o ditado por voz (voxtype): um 👍 começa a gravar, fale,
+# outro 👍 para e digita o texto na janela em foco.
 [gestos.like]
-rotulo = "👍 volume +"
-comando = "omarchy-audio-output-volume +5"
-segurar = 0.5
-repetir = 0.3
+rotulo = "👍 ditado (voxtype)"
+comando = "voxtype record toggle"
+segurar = 0.6
 
 [gestos.dislike]
 rotulo = "👎 volume −"

@@ -9,7 +9,8 @@ dinâmicos. ~6 ms por quadro na CPU.
 
 | Gesto | Ação padrão |
 |---|---|
-| 👍 / 👎 segurando | Volume + / − (repete enquanto segura) |
+| 👍 segurando | Liga/desliga o ditado por voz (voxtype) |
+| 👎 segurando | Volume − (repete enquanto segura) |
 | ☝ / 👇 segurando | Rola a janela ativa para cima / baixo |
 | 👋 mão de lado varrendo para a esquerda / direita | Janela da direita / esquerda (como no celular) |
 | ✌ segurando | Play/Pause |
