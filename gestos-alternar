@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Liga/desliga o reconhecimento de gestos (a câmera só fica ligada enquanto ativo).
+if systemctl --user is-active --quiet gestos; then
+  systemctl --user stop gestos
+  notify-send -a Gestos -t 1500 -h string:x-canonical-private-synchronous:gestos "✋ Gestos desligado"
+else
+  systemctl --user start gestos
+  notify-send -a Gestos -t 1500 -h string:x-canonical-private-synchronous:gestos "✋ Gestos ligado"
+fi

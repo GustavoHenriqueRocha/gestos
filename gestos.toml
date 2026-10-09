@@ -1,0 +1,50 @@
+# Gestos → comandos. Copiado para ~/.config/gestos/gestos.toml na instalação;
+# edite lá. O serviço relê o arquivo ao reiniciar (Super+Ctrl+G duas vezes).
+#
+# Cada gesto tem um comando de shell e um rótulo opcional mostrado na
+# notificação. Apague ou comente um gesto para desativá-lo.
+
+[camera]
+dispositivo = 0
+largura = 640
+altura = 480
+
+[ajustes]
+notificar = true
+swipe_distancia = 0.15  # quanto a mão precisa andar (fração da largura da imagem)
+segurar = 0.8           # segundos parado para mão aberta / joinha / punho
+pinca_passo = 0.04      # quanto subir/descer a pinça para cada passo de volume
+
+[gestos.swipe_esquerda]
+rotulo = "✌ ← Workspace anterior"
+comando = "hyprctl dispatch 'hl.dsp.focus({ workspace = \"e-1\" })'"
+
+[gestos.swipe_direita]
+rotulo = "✌ → Próximo workspace"
+comando = "hyprctl dispatch 'hl.dsp.focus({ workspace = \"e+1\" })'"
+
+[gestos.swipe_cima]
+rotulo = "✌ ↑ Tela cheia"
+comando = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"fullscreen\" })'"
+
+[gestos.swipe_baixo]
+rotulo = "✌ ↓ Scratchpad"
+comando = "hyprctl dispatch 'hl.dsp.workspace.toggle_special(\"scratchpad\")'"
+
+[gestos.pinca_cima]
+comando = "omarchy-audio-output-volume +5"
+
+[gestos.pinca_baixo]
+comando = "omarchy-audio-output-volume -5"
+
+[gestos.mao_aberta]
+rotulo = "✋ Menu do Omarchy"
+comando = "omarchy-menu toggle"
+
+[gestos.joinha]
+rotulo = "👍 Play/Pause"
+comando = "omarchy-shell media playPause"
+
+# [gestos.punho]
+# rotulo = "✊ Fechar janela"
+# comando = "hyprctl dispatch 'hl.dsp.window.close()'"
