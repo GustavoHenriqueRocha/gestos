@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Rola a janela ATIVA: se o cursor estiver fora dela, leva o cursor ao centro
+# dela antes (a rolagem vai sempre para a janela embaixo do cursor).
+# Uso: gestos-rolar <passos>   (positivo = para baixo)
+passos="${1:-15}"
+roda="$HOME/.local/bin/wlrctl-roda"
+read -r cx cy < <(hyprctl cursorpos | tr -d ',')
+read -r x y w h < <(hyprctl activewindow -j | python3 -c 'import json,sys
+j=json.load(sys.stdin); print(*j["at"], *j["size"]) if j.get("at") else print("0 0 0 0")')
+if (( w > 0 )) && (( cx < x || cx >= x + w || cy < y || cy >= y + h )); then
+  "$roda" pointer move $(( x + w / 2 - cx )) $(( y + h / 2 - cy ))
+fi
+exec "$roda" pointer scroll "$passos"

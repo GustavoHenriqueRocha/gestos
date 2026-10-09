@@ -30,11 +30,11 @@ comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"l\" })'"
 # Dois dedos girando em círculo: rolagem contínua
 [gestos.giro_horario]
 rotulo = "🌀 rolando ↓"
-comando = "~/.local/bin/wlrctl-roda pointer scroll 15"
+comando = "~/.local/bin/gestos-rolar 15"
 
 [gestos.giro_anti_horario]
 rotulo = "🌀 rolando ↑"
-comando = "~/.local/bin/wlrctl-roda pointer scroll -15"
+comando = "~/.local/bin/gestos-rolar -15"
 
 # Swipes laterais desligados (a maçaneta faz a troca); descomente para usar
 # [gestos.swipe_esquerda]
@@ -47,11 +47,11 @@ comando = "~/.local/bin/wlrctl-roda pointer scroll -15"
 
 [gestos.rolar_cima]
 rotulo = "✌ rolando ↑"
-comando = "~/.local/bin/wlrctl-roda pointer scroll -15"
+comando = "~/.local/bin/gestos-rolar -15"
 
 [gestos.rolar_baixo]
 rotulo = "✌ rolando ↓"
-comando = "~/.local/bin/wlrctl-roda pointer scroll 15"
+comando = "~/.local/bin/gestos-rolar 15"
 
 # Swipes verticais livres (a rolagem usa o movimento vertical dos dois dedos)
 # [gestos.swipe_cima]
