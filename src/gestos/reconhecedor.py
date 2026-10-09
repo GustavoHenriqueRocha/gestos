@@ -96,6 +96,9 @@ class Reconhecedor:
     swipe_janela: float = 0.6  # segundos para completar o movimento
     segurar: float = 0.8  # segundos parado para mao_aberta/joinha/punho
     pinca_janela: float = 1.0  # segundos para ir de uma zona da pinça à outra
+    rolar_zona_morta: float = 0.04  # quanto a mão sobe/desce antes de começar a rolar
+    rolar_velocidade: float = 4.5  # passos de rolagem por quadro, por unidade além da zona morta
+    pinca_repetir: float = 0.4  # segurando a pinça na zona final, repete a cada X s (0 desliga)
     frames_estaveis: int = 3
 
     _pose: str | None = None
@@ -105,6 +108,10 @@ class Reconhecedor:
     _disparou: bool = False
     _zona: tuple = (None, 0.0, 0)  # (zona, desde quando, quadros seguidos)
     _ultima_zona: tuple = (None, 0.0)  # (zona confirmada, quando saiu dela)
+    _repeticao: tuple = (None, 0.0)  # (evento, quando repetir) enquanto segura a pinça
+    _rolar_centro: tuple | None = None  # (x, y) da mão quando a rolagem começou
+    _rolar_cancelada: bool = False
+    _rolar_acumulado: float = 0.0
     # swipe: posição e pose bruta dos últimos quadros com mão
     _rastro: deque = field(default_factory=lambda: deque(maxlen=60))
     _repouso: tuple | None = None  # (t, x, y, pose) do último momento parado
@@ -126,7 +133,10 @@ class Reconhecedor:
             self._inicio_pose = agora
             self._disparou = False
 
-        if self._pose in (None, "dois_dedos", "pinca") or not pontos:
+        if self._pose == "dois_dedos" and pontos:
+            return eventos + self._rolagem(pontos, agora)
+        self._rolar_centro, self._rolar_cancelada = None, False
+        if self._pose in (None, "pinca") or not pontos:
             return eventos
         if not self._disparou and agora - self._inicio_pose >= self.segurar:
             self._disparou = True
@@ -174,12 +184,45 @@ class Reconhecedor:
         self._ultimo_swipe = (agora, direcao)
         return [direcao]
 
+    def _rolagem(self, p, agora):
+        """Joystick: com dois dedos, a distância vertical do ponto inicial dá a velocidade.
+
+        Só começa com os dois dedos parados um instante (swipe é rápido) e
+        desliga se a mão andar para o lado (aí é swipe, que costuma ir na diagonal).
+        """
+        x = (p[INDICADOR[0]].x + p[MEDIO[0]].x) / 2
+        y = (p[INDICADOR[0]].y + p[MEDIO[0]].y) / 2
+        if self._rolar_cancelada or agora - self._inicio_pose < 0.3:
+            return []
+        if self._rolar_centro is None:
+            self._rolar_centro, self._rolar_acumulado = (x, y), 0.0
+            return []
+        if abs(x - self._rolar_centro[0]) > 0.08:
+            self._rolar_cancelada = True  # até baixar os dedos e levantar de novo
+            return []
+        desvio = y - self._rolar_centro[1]
+        if abs(desvio) <= self.rolar_zona_morta:
+            self._rolar_acumulado = 0.0
+            return []
+        self._rolar_acumulado += (abs(desvio) - self.rolar_zona_morta) * self.rolar_velocidade
+        if self._rolar_acumulado < 1:
+            return []
+        passos = min(int(self._rolar_acumulado), 3)
+        self._rolar_acumulado -= int(self._rolar_acumulado)
+        return ["rolar_baixo" if desvio > 0 else "rolar_cima"] * passos
+
     def _pinca(self, p, agora):
         """Passar de pinça fechada para aberta (ou o contrário) em até `pinca_janela`."""
         zona = zona_pinca(p) if p else None
         atual, desde, n = self._zona
         n = n + 1 if zona == atual else 1
         self._zona = (zona, desde if zona == atual else agora, n)
+        evento, quando = self._repeticao
+        if evento and zona == atual and n > 3 and agora >= quando:
+            self._repeticao = (evento, agora + self.pinca_repetir)
+            return [evento]
+        if zona != atual:
+            self._repeticao = (None, 0.0)
         if zona is None or n != 3:  # zona confirmada no 3º quadro seguido
             if zona is None and atual is not None and n == 1:
                 self._ultima_zona = (atual, agora)
@@ -188,7 +231,11 @@ class Reconhecedor:
         self._ultima_zona = (zona, agora)
         if anterior is None or anterior == zona or agora - saiu > self.pinca_janela:
             return []
-        return ["pinca_abrir" if zona == "aberta" else "pinca_fechar"]
+        evento = "pinca_abrir" if zona == "aberta" else "pinca_fechar"
+        if self.pinca_repetir > 0:
+            # primeira repetição espera um pouco mais, para um gesto rápido dar um passo só
+            self._repeticao = (evento, agora + self.pinca_repetir + 0.3)
+        return [evento]
 
 
 _OPOSTO = {

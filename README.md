@@ -4,10 +4,9 @@ Controle do Omarchy (Hyprland) por gestos de mão na webcam, usando MediaPipe Ha
 
 | Gesto | Ação padrão |
 |---|---|
-| ✌ dois dedos → / ← | Próximo / anterior workspace |
-| ✌ dois dedos ↑ | Tela cheia |
-| ✌ dois dedos ↓ | Scratchpad |
-| 🤏 pontas encostadas → "L" aberto / "L" → encostadas | Volume + / − |
+| ✌ dois dedos → / ← | Foco na janela da direita / esquerda (como Super+setas) |
+| ✌ dois dedos parados, mão sobe / desce | Rolagem (joystick; precisa do `wlrctl`) |
+| 🤏 pontas encostadas → "L" aberto / "L" → encostadas (segurar repete) | Volume +10 / −10 |
 | ✋ mão aberta parada (0,8 s) | Menu do Omarchy |
 | 👍 joinha parado (0,8 s) | Play/Pause |
 | ✊ punho | (livre, configurável) |

@@ -88,6 +88,9 @@ def main() -> None:
         swipe_distancia=ajustes.get("swipe_distancia", 0.15),
         segurar=ajustes.get("segurar", 0.8),
         pinca_janela=ajustes.get("pinca_janela", 1.0),
+        pinca_repetir=ajustes.get("pinca_repetir", 0.4),
+        rolar_zona_morta=ajustes.get("rolar_zona_morta", 0.04),
+        rolar_velocidade=ajustes.get("rolar_velocidade", 4.5),
     )
     avisar = ajustes.get("notificar", True) and not args.simular
     inicio = time.monotonic()
