@@ -122,6 +122,8 @@ def main() -> None:
             confianca_min=motor_cfg.get("confianca_min", 0.8),
             quadros_estaveis=motor_cfg.get("quadros_estaveis", 4),
             arrastos=config.get("arrastar", {}),
+            arrastar_janela=config.get("arrastar_janela"),
+            avisar=lambda texto: painel and painel.atualizar(gesto=texto),
         )
     else:
         from .motor_hagrid import MotorHagrid

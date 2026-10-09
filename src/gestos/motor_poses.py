@@ -1,9 +1,12 @@
 """Motor de gestos: MediaPipe acha a mão, o classificador treinado com as mãos
 do usuário (poses.py) diz a pose, e poses seguradas viram eventos."""
 
+import json
+import subprocess
 import time
 
 from .poses import ClassificadorPoses
+from .reconhecedor import ANELAR, INDICADOR, MEDIO, MINIMO, dedo_esticado
 
 
 class Segurador:
@@ -70,8 +73,81 @@ class Arrasto:
         return []
 
 
+def _hypr(*args):
+    try:
+        return subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+class ArrastoJanela:
+    """Agarrar e arrastar a janela ativa: mão abre e fecha (✋ → ✊) para agarrar;
+    a janela vira flutuante e segue a mão; abrir a mão solta.
+
+    Exigir a mão aberta logo antes evita agarrar com o punho em repouso."""
+
+    def __init__(self, pose="fist", segurar=0.25, ganho=1.5, aberta_antes=1.0, tolerancia=0.3, avisar=None):
+        self.pose, self.segurar, self.ganho = pose, segurar, ganho
+        self.aberta_antes, self.tolerancia, self.avisar = aberta_antes, tolerancia, avisar
+        self.endereco = None  # janela agarrada
+        self._aberta = self._desde = self._visto = 0.0
+        self._ultimo = None  # (x, y) da mão no último movimento
+        self._resto = [0.0, 0.0]
+        self._tela = None
+
+    def __call__(self, bruta, pontos, agora):
+        if pontos and sum(dedo_esticado(pontos, d) for d in (INDICADOR, MEDIO, ANELAR, MINIMO)) >= 4:
+            self._aberta = agora
+        fechada = bruta == self.pose and pontos
+        if fechada:
+            if not self._visto or agora - self._visto > self.tolerancia:
+                self._desde = agora
+            self._visto = agora
+        if self.endereco:
+            if not fechada and agora - self._visto > self.tolerancia:
+                self._soltar()
+            elif fechada:
+                self._mover(pontos)
+            return []
+        if fechada and agora - self._desde >= self.segurar and self._desde - self._aberta <= self.aberta_antes:
+            self._agarrar(pontos)
+        return []
+
+    def _agarrar(self, pontos):
+        janela = json.loads(_hypr("activewindow", "-j") or "{}")
+        if not janela.get("address"):
+            return
+        self.endereco = janela["address"]
+        if not janela.get("floating"):
+            _hypr("dispatch", f'hl.dsp.window.float({{ action = "enable", window = "address:{self.endereco}" }})')
+        monitor = next((m for m in json.loads(_hypr("monitors", "-j") or "[]") if m.get("focused")), None)
+        if monitor:
+            self._tela = (monitor["width"] / monitor["scale"], monitor["height"] / monitor["scale"])
+        self._ultimo = (pontos[MEDIO[0]].x, pontos[MEDIO[0]].y)
+        self._resto = [0.0, 0.0]
+        if self.avisar:
+            self.avisar(f"✊ agarrou: {janela.get('class', 'janela')}")
+
+    def _mover(self, pontos):
+        if not self._tela:
+            return
+        x, y = pontos[MEDIO[0]].x, pontos[MEDIO[0]].y
+        dx = (x - self._ultimo[0]) * self._tela[0] * self.ganho + self._resto[0]
+        dy = (y - self._ultimo[1]) * self._tela[1] * self.ganho + self._resto[1]
+        self._ultimo = (x, y)
+        ix, iy = int(dx), int(dy)
+        self._resto = [dx - ix, dy - iy]
+        if ix or iy:
+            _hypr("dispatch", f'hl.dsp.window.move({{ x = {ix}, y = {iy}, relative = true, window = "address:{self.endereco}" }})')
+
+    def _soltar(self):
+        self.endereco = None
+        if self.avisar:
+            self.avisar("✋ soltou a janela")
+
+
 class MotorPoses:
-    def __init__(self, modelo_mp, poses, confianca_min=0.8, quadros_estaveis=4, arrastos=None):
+    def __init__(self, modelo_mp, poses, confianca_min=0.8, quadros_estaveis=4, arrastos=None, arrastar_janela=None, avisar=None):
         import mediapipe as mp
         from mediapipe.tasks.python import BaseOptions
         from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions, RunningMode
@@ -84,6 +160,7 @@ class MotorPoses:
         self.classificador = ClassificadorPoses()
         self.segurador = Segurador(poses, quadros_estaveis)
         self.arrastos = [Arrasto(nome, **cfg) for nome, cfg in (arrastos or {}).items()]
+        self.arrasto_janela = ArrastoJanela(avisar=avisar, **arrastar_janela) if arrastar_janela is not None else None
         self.confianca_min = confianca_min
         self.inicio = time.monotonic()
         self.ultimo_ts = -1
@@ -108,6 +185,8 @@ class MotorPoses:
         eventos = self.segurador(self.bruta, agora)
         for arrasto in self.arrastos:
             eventos += arrasto(self.bruta, self.pontos, agora)
+        if self.arrasto_janela:
+            self.arrasto_janela(self.bruta, self.pontos, agora)
         return eventos
 
     def registro(self):

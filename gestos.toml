@@ -70,3 +70,12 @@ segurar = 0.8
 rotulo = "👌 menu"
 comando = "omarchy-menu toggle"
 segurar = 0.8
+
+# ✋→✊ Agarrar e arrastar a janela ativa: abra a mão e feche (como pegar algo);
+# a janela vira flutuante e segue a mão; abra a mão para soltar.
+# Apague esta seção para desligar.
+[arrastar_janela]
+pose = "fist"
+segurar = 0.25      # segundos de punho para agarrar
+aberta_antes = 1.0  # a mão precisa ter estado aberta até X s antes de fechar
+ganho = 1.5         # 1 = a janela anda o mesmo que a mão na imagem; maior = mais rápido
