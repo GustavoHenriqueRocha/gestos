@@ -1,6 +1,7 @@
 """Lê a webcam, reconhece gestos da mão e executa comandos no Omarchy."""
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -52,6 +53,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, help="arquivo TOML (padrão: ~/.config/gestos/gestos.toml)")
     parser.add_argument("--debug", action="store_true", help="mostra a pose detectada a cada mudança")
     parser.add_argument("--simular", action="store_true", help="reconhece mas não executa comandos")
+    parser.add_argument("--gravar", type=Path, help="salva os pontos da mão de cada quadro (JSONL) para análise")
     args = parser.parse_args()
 
     caminho = args.config or (CONFIG_USUARIO if CONFIG_USUARIO.exists() else CONFIG_PADRAO)
@@ -84,13 +86,14 @@ def main() -> None:
     reconhecedor = Reconhecedor(
         swipe_distancia=ajustes.get("swipe_distancia", 0.15),
         segurar=ajustes.get("segurar", 0.8),
-        pinca_passo=ajustes.get("pinca_passo", 0.04),
+        pinca_passo=ajustes.get("pinca_passo", 0.3),
     )
     avisar = ajustes.get("notificar", True) and not args.simular
     inicio = time.monotonic()
     ultimo_ts = -1
     pose_anterior = None
     quadros, relogio_fps = 0, time.monotonic()
+    gravacao = open(args.gravar, "w") if args.gravar else None
     print("Gestos ativo.", flush=True)
 
     try:
@@ -108,7 +111,11 @@ def main() -> None:
             resultado = detector.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
             pontos = resultado.hand_landmarks[0] if resultado.hand_landmarks else None
 
-            for gesto in reconhecedor.atualizar(pontos):
+            eventos = reconhecedor.atualizar(pontos)
+            if gravacao:
+                pts = [[round(q.x, 4), round(q.y, 4)] for q in pontos] if pontos else None
+                gravacao.write(json.dumps({"t": ts, "w": round(time.time(), 3), "pose": reconhecedor._pose, "eventos": eventos, "p": pts}) + "\n")
+            for gesto in eventos:
                 if args.simular:
                     print(f"[gesto] {gesto}", flush=True)
                 else:
@@ -125,5 +132,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        if gravacao:
+            gravacao.close()
         captura.release()
         detector.close()

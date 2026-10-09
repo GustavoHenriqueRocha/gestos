@@ -13,7 +13,7 @@ altura = 480
 notificar = true
 swipe_distancia = 0.15  # quanto a mão precisa andar (fração da largura da imagem)
 segurar = 0.8           # segundos parado para mão aberta / joinha / punho
-pinca_passo = 0.04      # quanto subir/descer a pinça para cada passo de volume
+pinca_passo = 0.3       # quanto abrir/fechar a pinça (em tamanhos de mão) por passo de volume
 
 [gestos.swipe_esquerda]
 rotulo = "✌ ← Workspace anterior"
@@ -31,10 +31,10 @@ comando = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"fullscreen\" })
 rotulo = "✌ ↓ Scratchpad"
 comando = "hyprctl dispatch 'hl.dsp.workspace.toggle_special(\"scratchpad\")'"
 
-[gestos.pinca_cima]
+[gestos.pinca_abrir]
 comando = "omarchy-audio-output-volume +5"
 
-[gestos.pinca_baixo]
+[gestos.pinca_fechar]
 comando = "omarchy-audio-output-volume -5"
 
 [gestos.mao_aberta]

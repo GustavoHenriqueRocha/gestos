@@ -2,10 +2,13 @@
 
 Coordenadas normalizadas (0..1), com a imagem já espelhada: x cresce para a
 direita do usuário e y cresce para baixo.
+
+Limites ajustados com gravações reais (ver analisar.py e sessao-guiada.sh).
 """
 
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 # Índices dos pontos da mão no MediaPipe
@@ -37,23 +40,36 @@ def escala(p):
     return dist(p[PULSO], p[MEDIO[0]]) or 1e-6
 
 
+def abertura_pinca(p):
+    """Distância entre as pontas do polegar e do indicador, relativa ao tamanho da mão."""
+    return dist(p[POLEGAR[3]], p[INDICADOR[3]]) / escala(p)
+
+
+def mao_inteira_visivel(p, margem=0.02):
+    return all(-margem <= q.x <= 1 + margem and -margem <= q.y <= 1 + margem for q in p)
+
+
 def classificar_pose(p):
-    """Pose instantânea da mão: pinca, dois_dedos, mao_aberta, joinha, punho ou None."""
+    """Pose instantânea: pinca, dois_dedos, mao_aberta, joinha, punho ou None."""
     s = escala(p)
-    dedos = [dedo_esticado(p, d) for d in (INDICADOR, MEDIO, ANELAR, MINIMO)]
+    indicador, medio, anelar, minimo = (dedo_esticado(p, d) for d in (INDICADOR, MEDIO, ANELAR, MINIMO))
     polegar = polegar_esticado(p)
 
-    # pinça: pontas do polegar e indicador juntas, mas longe da palma (no punho
-    # fechado elas também se encostam, só que perto do pulso)
-    pontas_juntas = dist(p[POLEGAR[3]], p[INDICADOR[3]]) < 0.28 * s
-    if pontas_juntas and not dedos[0] and dist(p[INDICADOR[3]], p[PULSO]) > 1.1 * s:
-        return "pinca"
-    if dedos == [True, True, False, False]:
+    if indicador and medio and not anelar and not minimo:
         return "dois_dedos"
-    if all(dedos) and polegar:
-        return "mao_aberta"
-    if not any(dedos):
-        # polegar para cima: ponta bem acima da base e da mão fechada
+    if not medio and not anelar and not minimo:
+        # pinça aberta: "L" com polegar e indicador; fechada: pontas juntas com
+        # o indicador longe do pulso (no punho fechado ele fica encolhido)
+        if indicador and polegar:
+            return "pinca"
+        if not indicador and abertura_pinca(p) < 0.5 and dist(p[INDICADOR[3]], p[PULSO]) > 1.1 * s:
+            return "pinca"
+    if not mao_inteira_visivel(p):
+        return None  # poses paradas só com a mão inteira na imagem
+    if indicador and medio and anelar and minimo and polegar:
+        # dedos para cima; mão pendurada no pé da imagem não conta
+        return "mao_aberta" if p[MEDIO[3]].y < p[PULSO].y else None
+    if not (indicador or medio or anelar or minimo):
         if polegar and p[POLEGAR[3]].y < p[POLEGAR[2]].y < p[POLEGAR[1]].y and p[POLEGAR[3]].y < p[INDICADOR[1]].y - 0.3 * s:
             return "joinha"
         return "punho"
@@ -65,23 +81,27 @@ class Reconhecedor:
     """Acompanha as poses ao longo do tempo e emite eventos de gesto."""
 
     swipe_distancia: float = 0.15  # fração da largura da imagem
-    swipe_janela: float = 0.7  # segundos para completar o movimento
+    swipe_janela: float = 0.6  # segundos para completar o movimento
     segurar: float = 0.8  # segundos parado para mao_aberta/joinha/punho
-    pinca_passo: float = 0.04  # deslocamento vertical por passo de volume
+    pinca_passo: float = 0.3  # variação da abertura (em tamanhos de mão) por passo
     frames_estaveis: int = 3
 
     _pose: str | None = None
     _candidata: str | None = None
     _contagem: int = 0
     _inicio_pose: float = 0.0
-    _ancora: tuple | None = None
-    _historico: list = field(default_factory=list)
     _disparou: bool = False
+    _abertura: float | None = None
+    # swipe: posição e pose bruta dos últimos quadros com mão
+    _rastro: deque = field(default_factory=lambda: deque(maxlen=60))
+    _repouso: tuple | None = None  # (t, x, y, pose) do último momento parado
+    _ultimo_swipe: tuple = (0.0, None)  # (t, direção)
 
     def atualizar(self, pontos, agora=None):
         """Recebe os pontos (ou None se não há mão) e devolve a lista de eventos."""
         agora = time.monotonic() if agora is None else agora
         pose = classificar_pose(pontos) if pontos else None
+        eventos = self._swipe(pontos, pose, agora)
 
         # só troca de pose depois de alguns frames iguais, para não piscar
         if pose == self._candidata:
@@ -91,58 +111,84 @@ class Reconhecedor:
         if self._candidata != self._pose and self._contagem >= self.frames_estaveis:
             self._pose = self._candidata
             self._inicio_pose = agora
-            self._ancora = None
-            self._historico.clear()
             self._disparou = False
+            self._abertura = None
 
-        if self._pose is None or not pontos:
-            return []
-
-        if self._pose == "dois_dedos":
-            return self._swipe(pontos, agora)
+        if self._pose is None or not pontos or self._pose == "dois_dedos":
+            return eventos
         if self._pose == "pinca":
             # 0,3 s de pinça antes de mexer no volume, para ignorar transições
-            return self._pinca(pontos) if agora - self._inicio_pose >= 0.3 else []
+            if agora - self._inicio_pose < 0.3:
+                return eventos
+            return eventos + self._pinca(pontos)
         if not self._disparou and agora - self._inicio_pose >= self.segurar:
             self._disparou = True
-            return [self._pose]
-        return []
+            eventos.append(self._pose)
+        return eventos
 
-    def _swipe(self, p, agora):
-        x = (p[INDICADOR[3]].x + p[MEDIO[3]].x) / 2
-        y = (p[INDICADOR[3]].y + p[MEDIO[3]].y) / 2
-        self._historico.append((agora, x, y))
-        self._historico = [h for h in self._historico if agora - h[0] <= self.swipe_janela]
-        if self._disparou:
-            # espera a mão parar antes de aceitar outro swipe
-            if len(self._historico) > 2 and _amplitude(self._historico) < self.swipe_distancia / 4:
-                self._disparou = False
-                self._historico.clear()
+    def _swipe(self, p, pose, agora):
+        """Swipe = movimento rápido saindo do repouso, com dois dedos.
+
+        Durante o movimento a imagem borra e a pose some, então a pose é
+        conferida no repouso de onde o movimento saiu. A volta da mão (direção
+        oposta logo em seguida) é ignorada.
+        """
+        if not p:
+            self._rastro.clear()
+            self._repouso = None
+            return []
+        x = (p[INDICADOR[0]].x + p[MEDIO[0]].x) / 2  # base dos dedos: borra menos que as pontas
+        y = (p[INDICADOR[0]].y + p[MEDIO[0]].y) / 2
+        self._rastro.append((agora, x, y, pose))
+
+        recentes = [r for r in self._rastro if agora - r[0] <= 0.2]
+        if len(recentes) >= 3 and _amplitude(recentes) < 0.03:
+            self._repouso = (agora, x, y, pose)
+            return []
+        if self._repouso is None or agora - self._repouso[0] > self.swipe_janela:
             return []
 
-        _, x0, y0 = self._historico[0]
+        _, x0, y0, pose0 = self._repouso
         dx, dy = x - x0, y - y0
         if max(abs(dx), abs(dy)) < self.swipe_distancia:
             return []
-        self._disparou = True
+        movimento = [r[3] for r in self._rastro if r[0] >= self._repouso[0]]
+        if pose0 != "dois_dedos" and movimento.count("dois_dedos") < 0.4 * len(movimento):
+            return []
+
         if abs(dx) > abs(dy):
-            return ["swipe_direita" if dx > 0 else "swipe_esquerda"]
-        return ["swipe_baixo" if dy > 0 else "swipe_cima"]
+            direcao = "swipe_direita" if dx > 0 else "swipe_esquerda"
+        else:
+            direcao = "swipe_baixo" if dy > 0 else "swipe_cima"
+        self._repouso = None  # precisa parar de novo para o próximo swipe
+        t_ant, dir_ant = self._ultimo_swipe
+        if dir_ant == _OPOSTO[direcao] and agora - t_ant < 1.2:
+            return []  # é a mão voltando
+        self._ultimo_swipe = (agora, direcao)
+        return [direcao]
 
     def _pinca(self, p):
-        y = (p[POLEGAR[3]].y + p[INDICADOR[3]].y) / 2
-        if self._ancora is None:
-            self._ancora = (y,)
+        """Abrir/fechar polegar e indicador: um evento a cada `pinca_passo`."""
+        abertura = abertura_pinca(p)
+        if self._abertura is None:
+            self._abertura = abertura
             return []
-        passos = int((self._ancora[0] - y) / self.pinca_passo)
-        if passos == 0:
+        delta = abertura - self._abertura
+        if abs(delta) < self.pinca_passo:
             return []
-        self._ancora = (self._ancora[0] - passos * self.pinca_passo,)
-        evento = "pinca_cima" if passos > 0 else "pinca_baixo"
-        return [evento] * abs(passos)
+        # no máximo um passo por quadro: saltos grandes costumam ser erro de detecção
+        passo = math.copysign(self.pinca_passo, delta)
+        self._abertura += passo
+        return ["pinca_abrir" if passo > 0 else "pinca_fechar"]
 
 
-def _amplitude(historico):
-    xs = [h[1] for h in historico]
-    ys = [h[2] for h in historico]
+_OPOSTO = {
+    "swipe_direita": "swipe_esquerda", "swipe_esquerda": "swipe_direita",
+    "swipe_cima": "swipe_baixo", "swipe_baixo": "swipe_cima",
+}
+
+
+def _amplitude(rastro):
+    xs = [r[1] for r in rastro]
+    ys = [r[2] for r in rastro]
     return max(max(xs) - min(xs), max(ys) - min(ys))
