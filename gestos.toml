@@ -13,7 +13,7 @@ altura = 480
 notificar = true
 swipe_distancia = 0.15  # quanto a mão precisa andar (fração da largura da imagem)
 segurar = 0.8           # segundos parado para mão aberta / joinha / punho
-pinca_passo = 0.3       # quanto abrir/fechar a pinça (em tamanhos de mão) por passo de volume
+pinca_janela = 1.0      # segundos para ir de pinça fechada (pontas encostadas) a aberta ("L") e vice-versa
 
 [gestos.swipe_esquerda]
 rotulo = "✌ ← Workspace anterior"

@@ -87,7 +87,7 @@ def main() -> None:
     reconhecedor = Reconhecedor(
         swipe_distancia=ajustes.get("swipe_distancia", 0.15),
         segurar=ajustes.get("segurar", 0.8),
-        pinca_passo=ajustes.get("pinca_passo", 0.3),
+        pinca_janela=ajustes.get("pinca_janela", 1.0),
     )
     avisar = ajustes.get("notificar", True) and not args.simular
     inicio = time.monotonic()

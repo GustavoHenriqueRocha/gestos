@@ -45,6 +45,23 @@ def abertura_pinca(p):
     return dist(p[POLEGAR[3]], p[INDICADOR[3]]) / escala(p)
 
 
+def zona_pinca(p):
+    """'fechada' (pontas encostadas), 'aberta' ("L" largo) ou None.
+
+    As zonas são bem separadas de propósito: a mão relaxada fica numa
+    meia-pinça (abertura ~0,35) e não pode virar volume.
+    """
+    if any(dedo_esticado(p, d) for d in (MEDIO, ANELAR, MINIMO)):
+        return None
+    abertura = abertura_pinca(p)
+    if abertura > 0.9 and dedo_esticado(p, INDICADOR) and polegar_esticado(p):
+        return "aberta"
+    # no punho fechado as pontas também se encostam, mas com o indicador encolhido
+    if abertura < 0.25 and dist(p[INDICADOR[3]], p[PULSO]) > 1.15 * escala(p):
+        return "fechada"
+    return None
+
+
 def mao_inteira_visivel(p, margem=0.02):
     return all(-margem <= q.x <= 1 + margem and -margem <= q.y <= 1 + margem for q in p)
 
@@ -57,13 +74,8 @@ def classificar_pose(p):
 
     if indicador and medio and not anelar and not minimo:
         return "dois_dedos"
-    if not medio and not anelar and not minimo:
-        # pinça aberta: "L" com polegar e indicador; fechada: pontas juntas com
-        # o indicador longe do pulso (no punho fechado ele fica encolhido)
-        if indicador and polegar:
-            return "pinca"
-        if not indicador and abertura_pinca(p) < 0.5 and dist(p[INDICADOR[3]], p[PULSO]) > 1.1 * s:
-            return "pinca"
+    if zona_pinca(p):
+        return "pinca"
     if not mao_inteira_visivel(p):
         return None  # poses paradas só com a mão inteira na imagem
     if indicador and medio and anelar and minimo and polegar:
@@ -83,7 +95,7 @@ class Reconhecedor:
     swipe_distancia: float = 0.15  # fração da largura da imagem
     swipe_janela: float = 0.6  # segundos para completar o movimento
     segurar: float = 0.8  # segundos parado para mao_aberta/joinha/punho
-    pinca_passo: float = 0.3  # variação da abertura (em tamanhos de mão) por passo
+    pinca_janela: float = 1.0  # segundos para ir de uma zona da pinça à outra
     frames_estaveis: int = 3
 
     _pose: str | None = None
@@ -91,7 +103,8 @@ class Reconhecedor:
     _contagem: int = 0
     _inicio_pose: float = 0.0
     _disparou: bool = False
-    _abertura: float | None = None
+    _zona: tuple = (None, 0.0, 0)  # (zona, desde quando, quadros seguidos)
+    _ultima_zona: tuple = (None, 0.0)  # (zona confirmada, quando saiu dela)
     # swipe: posição e pose bruta dos últimos quadros com mão
     _rastro: deque = field(default_factory=lambda: deque(maxlen=60))
     _repouso: tuple | None = None  # (t, x, y, pose) do último momento parado
@@ -101,7 +114,7 @@ class Reconhecedor:
         """Recebe os pontos (ou None se não há mão) e devolve a lista de eventos."""
         agora = time.monotonic() if agora is None else agora
         pose = classificar_pose(pontos) if pontos else None
-        eventos = self._swipe(pontos, pose, agora)
+        eventos = self._swipe(pontos, pose, agora) + self._pinca(pontos, agora)
 
         # só troca de pose depois de alguns frames iguais, para não piscar
         if pose == self._candidata:
@@ -112,15 +125,9 @@ class Reconhecedor:
             self._pose = self._candidata
             self._inicio_pose = agora
             self._disparou = False
-            self._abertura = None
 
-        if self._pose is None or not pontos or self._pose == "dois_dedos":
+        if self._pose in (None, "dois_dedos", "pinca") or not pontos:
             return eventos
-        if self._pose == "pinca":
-            # 0,3 s de pinça antes de mexer no volume, para ignorar transições
-            if agora - self._inicio_pose < 0.3:
-                return eventos
-            return eventos + self._pinca(pontos)
         if not self._disparou and agora - self._inicio_pose >= self.segurar:
             self._disparou = True
             eventos.append(self._pose)
@@ -167,19 +174,21 @@ class Reconhecedor:
         self._ultimo_swipe = (agora, direcao)
         return [direcao]
 
-    def _pinca(self, p):
-        """Abrir/fechar polegar e indicador: um evento a cada `pinca_passo`."""
-        abertura = abertura_pinca(p)
-        if self._abertura is None:
-            self._abertura = abertura
+    def _pinca(self, p, agora):
+        """Passar de pinça fechada para aberta (ou o contrário) em até `pinca_janela`."""
+        zona = zona_pinca(p) if p else None
+        atual, desde, n = self._zona
+        n = n + 1 if zona == atual else 1
+        self._zona = (zona, desde if zona == atual else agora, n)
+        if zona is None or n != 3:  # zona confirmada no 3º quadro seguido
+            if zona is None and atual is not None and n == 1:
+                self._ultima_zona = (atual, agora)
             return []
-        delta = abertura - self._abertura
-        if abs(delta) < self.pinca_passo:
+        anterior, saiu = self._ultima_zona
+        self._ultima_zona = (zona, agora)
+        if anterior is None or anterior == zona or agora - saiu > self.pinca_janela:
             return []
-        # no máximo um passo por quadro: saltos grandes costumam ser erro de detecção
-        passo = math.copysign(self.pinca_passo, delta)
-        self._abertura += passo
-        return ["pinca_abrir" if passo > 0 else "pinca_fechar"]
+        return ["pinca_abrir" if zona == "aberta" else "pinca_fechar"]
 
 
 _OPOSTO = {
