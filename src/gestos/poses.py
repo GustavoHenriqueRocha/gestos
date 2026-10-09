@@ -20,7 +20,9 @@ from pathlib import Path
 import numpy as np
 
 PASTA = Path(__file__).resolve().parents[2] / "gravacoes"
-MODELO = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "gestos" / "modelo-poses.pkl"
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "gestos"
+MODELO = CONFIG / "modelo-poses.pkl"
+EXTRAS = CONFIG / "poses-extras.json"  # poses criadas com --nova
 
 # (classe, instrução na tela). "nada" = mão à toa; palm e fist são poses de descanso.
 CLASSES = [
@@ -36,6 +38,19 @@ CLASSES = [
     ("fist", "PUNHO FECHADO"),
     ("nada", "MAO A TOA: digite, coce, gesticule, abaixe"),
 ]
+
+
+def todas_classes():
+    """Poses fixas + as criadas pelo usuário (gestos-treinar gravar --nova)."""
+    extras = json.loads(EXTRAS.read_text()) if EXTRAS.exists() else []
+    return CLASSES + [tuple(e) for e in extras]
+
+
+def nova_pose(nome, instrucao):
+    extras = json.loads(EXTRAS.read_text()) if EXTRAS.exists() else []
+    extras = [e for e in extras if e[0] != nome] + [[nome, instrucao]]
+    EXTRAS.parent.mkdir(parents=True, exist_ok=True)
+    EXTRAS.write_text(json.dumps(extras, ensure_ascii=False, indent=1))
 
 
 def caracteristicas(pontos, mundo):
@@ -100,7 +115,7 @@ def gravar(segundos=12, so=None):
     inicio = time.monotonic()
     ts_ant = -1
     etapas = [("prep", "Treino: siga as instrucoes. Feche a janela p/ cancelar.", 4)]
-    for classe, texto in CLASSES:
+    for classe, texto in todas_classes():
         if so and classe not in so:
             continue
         etapas += [("prep", "PROXIMA: " + texto, 3), (classe, texto, segundos)]
@@ -210,5 +225,10 @@ def main() -> None:
     parser.add_argument("acao", nargs="?", default="treinar", choices=["gravar", "treinar"])
     parser.add_argument("--segundos", type=float, default=12)
     parser.add_argument("--so", nargs="+", metavar="POSE", help="grava só estas poses (ex.: --so point_right)")
+    parser.add_argument("--nova", nargs=2, metavar=("NOME", "INSTRUCAO"),
+                        help='cria uma pose nova e grava só ela (ex.: --nova rock "CHIFRINHO, indicador e minimo")')
     args = parser.parse_args()
+    if args.nova:
+        nova_pose(*args.nova)
+        args.so = [args.nova[0]]
     gravar(args.segundos, args.so) if args.acao == "gravar" else treinar()
