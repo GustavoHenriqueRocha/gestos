@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -93,6 +94,8 @@ def main() -> None:
     ultimo_ts = -1
     pose_anterior = None
     quadros, relogio_fps = 0, time.monotonic()
+    # SIGTERM (systemctl stop, kill) encerra igual ao Ctrl+C, fechando câmera e gravação
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))
     gravacao = open(args.gravar, "w") if args.gravar else None
     print("Gestos ativo.", flush=True)
 

@@ -31,6 +31,6 @@ for passo in "${passos[@]}"; do
   sleep 7
 done
 echo "$(date +%s.%N) fim" >> "$saida/rotulos.txt"
-kill -INT $pid; wait $pid
+kill -TERM $pid; wait $pid
 avisar "Sessão de gestos" "Terminou, obrigado!"
 echo "$saida"
