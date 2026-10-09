@@ -110,9 +110,18 @@ def main() -> None:
     import cv2
 
     motor_cfg = config.get("motor", {})
-    if motor_cfg.get("tipo", "hagrid") == "mediapipe":
+    tipo = motor_cfg.get("tipo", "poses")
+    if tipo == "mediapipe":
         from .motor_mediapipe import MotorMediapipe
         motor = MotorMediapipe(baixar_modelo(), ajustes)
+    elif tipo == "poses":
+        from .motor_poses import MotorPoses
+        motor = MotorPoses(
+            baixar_modelo(),
+            poses={nome: regra for nome, regra in gestos.items() if "segurar" in regra},
+            confianca_min=motor_cfg.get("confianca_min", 0.8),
+            quadros_estaveis=motor_cfg.get("quadros_estaveis", 4),
+        )
     else:
         from .motor_hagrid import MotorHagrid
         motor = MotorHagrid(

@@ -10,6 +10,7 @@ dependencies = [
     "filterpy>=1.4.5",
     "mediapipe==0.10.21",
     "onnxruntime>=1.31.0",
+    "scikit-learn>=1.9.1",
     "scipy>=1.17.1",
 ]
 
@@ -17,6 +18,7 @@ dependencies = [
 gestos = "gestos:main"
 gestos-calibrar = "gestos.calibrar:main"
 gestos-avaliar = "gestos.avaliar:main"
+gestos-treinar = "gestos.poses:main"
 
 [build-system]
 requires = ["uv_build>=0.12.12,<0.13.0"]
