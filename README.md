@@ -4,7 +4,7 @@ Controle do Omarchy (Hyprland) por gestos de mão na webcam, usando MediaPipe Ha
 
 | Gesto | Ação padrão |
 |---|---|
-| ✋🔄 mão aberta girando como maçaneta (horário / anti-horário) | Janela da direita / esquerda (como Super+setas); voltar ao neutro não dispara |
+| 🔄 girar o pulso como chave ou maçaneta (dois dedos ou mão aberta; horário / anti-horário) | Janela da direita / esquerda (como Super+setas); voltar ao neutro não dispara |
 | ✌🌀 dois dedos girando em círculo (horário / anti-horário) | Rolagem contínua para baixo / cima |
 | ✌ dois dedos parados, mão sobe / desce | Rolagem joystick |
 | 🤏 pontas encostadas → "L" aberto / "L" → encostadas (segurar repete) | Volume +10 / −10 |

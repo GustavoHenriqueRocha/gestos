@@ -159,11 +159,13 @@ def main() -> None:
             ultimo_ts = ts
             resultado = detector.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
             pontos = resultado.hand_landmarks[0] if resultado.hand_landmarks else None
+            mundo = resultado.hand_world_landmarks[0] if resultado.hand_world_landmarks else None
 
-            eventos = reconhecedor.atualizar(pontos)
+            eventos = reconhecedor.atualizar(pontos, mundo=mundo)
             if gravacao:
                 pts = [[round(q.x, 4), round(q.y, 4)] for q in pontos] if pontos else None
-                gravacao.write(json.dumps({"t": ts, "w": round(time.time(), 3), "pose": reconhecedor._pose, "eventos": eventos, "p": pts}) + "\n")
+                m3 = [[round(q.x, 4), round(q.y, 4), round(q.z, 4)] for q in mundo] if mundo else None
+                gravacao.write(json.dumps({"t": ts, "w": round(time.time(), 3), "pose": reconhecedor._pose, "eventos": eventos, "p": pts, "m": m3}) + "\n")
             for gesto in eventos:
                 if args.simular:
                     print(f"[gesto] {gesto}", flush=True)

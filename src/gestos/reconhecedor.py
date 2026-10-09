@@ -123,11 +123,13 @@ class Reconhecedor:
     _giro_recente: float = 0.0  # último instante em que houve giro de verdade
     _giro_deltas: deque = field(default_factory=deque)  # (t, graus) do último segundo
     # maçaneta: mão aberta girando a partir de um ângulo neutro
-    macaneta_limite: float = 50.0  # graus além do neutro para disparar
+    macaneta_limite: float = 35.0  # graus além do neutro para disparar
     _mac_neutro: float | None = None
     _mac_armada: bool = True
     _mac_recentes: deque = field(default_factory=lambda: deque(maxlen=6))
     _mac_visto: float = 0.0
+    _palmas: deque = field(default_factory=lambda: deque(maxlen=15))  # (t, ângulo da palma), ~0,5 s
+    _mac_saiu: float = 0.0  # quando a mão saiu da zona neutra
     _mac_pulso: deque = field(default_factory=lambda: deque(maxlen=15))  # (x, y) do pulso, ~0,5 s
     _rolar_acumulado: float = 0.0
     # swipe: posição e pose bruta dos últimos quadros com mão
@@ -135,11 +137,16 @@ class Reconhecedor:
     _swipe_pausa: float = 0.0
     _ultimo_swipe: tuple = (0.0, None)  # (t, direção)
 
-    def atualizar(self, pontos, agora=None):
-        """Recebe os pontos (ou None se não há mão) e devolve a lista de eventos."""
+    def atualizar(self, pontos, agora=None, mundo=None):
+        """Recebe os pontos (ou None se não há mão) e devolve a lista de eventos.
+
+        `mundo` são os mesmos pontos em 3D (metros, hand_world_landmarks); com
+        eles a maçaneta mede o giro da palma em torno do antebraço."""
         agora = time.monotonic() if agora is None else agora
         pose = classificar_pose(pontos) if pontos else None
-        eventos = self._giro(pontos, pose, agora) + self._macaneta(pontos, agora)
+        if mundo:
+            self._palmas.append((agora, angulo_palma(mundo)))
+        eventos = self._giro(pontos, pose, agora) + self._macaneta(pontos, agora, mundo, pose)
         eventos += self._swipe(pontos, pose, agora) + self._pinca(pontos, agora)
 
         # só troca de pose depois de alguns frames iguais, para não piscar
@@ -219,6 +226,11 @@ class Reconhecedor:
             return []
         if dedo_esticado(p, ANELAR) and dedo_esticado(p, MINIMO):
             return []  # mão aberta girando é a maçaneta, não o giro dos dois dedos
+        palmas = [a for t, a in self._palmas if agora - t <= 0.5]
+        if len(palmas) >= 5 and max(_dif(a, palmas[0]) for a in palmas) > 40:
+            self._giro_deltas.clear()
+            self._giro_acumulado = 0.0
+            return []  # a palma está virando: é maçaneta/chave, não círculo
         x = (p[INDICADOR[3]].x + p[MEDIO[3]].x) / 2
         y = (p[INDICADOR[3]].y + p[MEDIO[3]].y) / 2
         self._giro_pontos.append((agora, x, y))
@@ -260,13 +272,21 @@ class Reconhecedor:
         # y cresce para baixo, então ângulo crescendo = sentido horário na tela
         return ["giro_horario" if delta > 0 else "giro_anti_horario"]
 
-    def _macaneta(self, p, agora):
-        """Mão aberta girando como maçaneta: além de `macaneta_limite` graus do
-        neutro dispara uma vez; voltar ao neutro rearma sem disparar nada."""
-        if p and escala(p) >= 0.12 and sum(dedo_esticado(p, d) for d in (INDICADOR, MEDIO, ANELAR, MINIMO)) >= 3:
+    def _macaneta(self, p, agora, mundo=None, pose=None):
+        """Mão girando como maçaneta: além de `macaneta_limite` graus do neutro
+        dispara uma vez; voltar ao neutro rearma sem disparar nada.
+
+        Com pontos 3D mede o giro da palma em torno do antebraço (vale com os
+        dedos abertos ou curvados, como segurando uma esfera). Sem 3D, usa a
+        inclinação da mão na imagem.
+        """
+        valida = p and escala(p) >= 0.12 and pose not in ("pinca", "punho")
+        if valida and mundo:
+            angulo = angulo_palma(mundo)
+        elif valida and sum(dedo_esticado(p, d) for d in (INDICADOR, MEDIO, ANELAR, MINIMO)) >= 3:
             angulo = math.degrees(math.atan2(p[MEDIO[0]].x - p[PULSO].x, p[PULSO].y - p[MEDIO[0]].y))
         elif p and self._mac_neutro is not None and agora - self._mac_visto < 0.4:
-            return []  # no meio do giro os dedos borram: espera um pouco antes de esquecer
+            return []  # no meio do giro a detecção falha às vezes: espera antes de esquecer
         else:
             if not p or agora - self._mac_visto > 0.4:
                 self._mac_neutro, self._mac_armada = None, True
@@ -278,11 +298,9 @@ class Reconhecedor:
         self._mac_pulso.append((p[PULSO].x, p[PULSO].y))
         if self._mac_neutro is None:
             # neutro = ângulo da mão parada (6 quadros quase iguais)
-            if len(self._mac_recentes) == self._mac_recentes.maxlen and max(self._mac_recentes) - min(self._mac_recentes) < 10:
-                neutro = sum(self._mac_recentes) / len(self._mac_recentes)
-                # só com a mão para cima; pendurada ou deitada não vale
-                if -75 <= neutro <= 30:
-                    self._mac_neutro = neutro
+            recentes = list(self._mac_recentes)
+            if len(recentes) == self._mac_recentes.maxlen and max(_dif(a, recentes[0]) for a in recentes) < 12:
+                self._mac_neutro = recentes[-1]
             return []
         desvio = (angulo - self._mac_neutro + 180) % 360 - 180
         if not self._mac_armada:
@@ -291,8 +309,12 @@ class Reconhecedor:
             return []
         if abs(desvio) < 15:
             self._mac_neutro += 0.05 * desvio  # neutro acompanha a mão devagar
+            self._mac_saiu = agora
             return []
         if abs(desvio) < self.macaneta_limite:
+            return []
+        if agora - self._mac_saiu > 0.7:
+            self._mac_neutro = angulo  # deriva lenta não é giro: adota a posição nova
             return []
         xs = [q[0] for q in self._mac_pulso]
         ys = [q[1] for q in self._mac_pulso]
@@ -309,8 +331,10 @@ class Reconhecedor:
         """
         x = (p[INDICADOR[0]].x + p[MEDIO[0]].x) / 2
         y = (p[INDICADOR[0]].y + p[MEDIO[0]].y) / 2
-        if agora - self._giro_recente < 0.5:
-            self._rolar_cancelada = True  # está girando: o joystick fica de fora
+        palmas = [a for t, a in self._palmas if agora - t <= 0.5]
+        virando = len(palmas) >= 5 and max(_dif(a, palmas[0]) for a in palmas) > 30
+        if agora - self._giro_recente < 0.5 or virando:
+            self._rolar_cancelada = True  # girando (dedos ou palma): o joystick fica de fora
         if self._rolar_cancelada or agora - self._inicio_pose < 0.3:
             return []
         if self._rolar_centro is None:
@@ -361,6 +385,31 @@ _OPOSTO = {
     "swipe_direita": "swipe_esquerda", "swipe_esquerda": "swipe_direita",
     "swipe_cima": "swipe_baixo", "swipe_baixo": "swipe_cima",
 }
+
+
+def angulo_palma(m):
+    """Giro da palma em torno do antebraço (graus), a partir dos pontos 3D.
+
+    Eixo = pulso → base do médio; normal da palma = (pulso→indicador) × (pulso→mínimo).
+    O ângulo é medido no plano perpendicular ao eixo, com referência na direção
+    da câmera; sinal ajustado para horário (visto pelo usuário) ser positivo.
+    """
+    def sub(a, b): return (a.x - b.x, a.y - b.y, a.z - b.z)
+    def cruz(a, b): return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    def esc(a, b): return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    def unit(a):
+        n = math.sqrt(esc(a, a)) or 1e-9
+        return (a[0] / n, a[1] / n, a[2] / n)
+    eixo = unit(sub(m[MEDIO[0]], m[PULSO]))
+    normal = unit(cruz(sub(m[INDICADOR[0]], m[PULSO]), sub(m[MINIMO[0]], m[PULSO])))
+    camera = (0.0, 0.0, -1.0)
+    r1 = unit(tuple(c - esc(camera, eixo) * e for c, e in zip(camera, eixo)))
+    r2 = cruz(eixo, r1)
+    return -math.degrees(math.atan2(esc(normal, r2), esc(normal, r1)))
+
+
+def _dif(a, b):
+    return abs((a - b + 180) % 360 - 180)
 
 
 def _curva(trecho):
