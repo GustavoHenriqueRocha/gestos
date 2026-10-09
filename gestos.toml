@@ -70,3 +70,17 @@ segurar = 0.8
 rotulo = "👌 menu"
 comando = "omarchy-menu toggle"
 segurar = 0.8
+
+# 🤏 Pinça (outros dedos dobrados) e arrastar: agarra depois de "segurar" s;
+# subir/descer a mão muda o volume a cada "passo" (fração da altura da imagem).
+[arrastar.pinch]
+segurar = 0.3
+passo = 0.04
+
+[gestos.pinch_mais]
+rotulo = "🤏 volume +"
+comando = "omarchy-audio-output-volume +5"
+
+[gestos.pinch_menos]
+rotulo = "🤏 volume −"
+comando = "omarchy-audio-output-volume -5"

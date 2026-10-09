@@ -38,8 +38,40 @@ class Segurador:
         return []
 
 
+class Arrasto:
+    """Pose de "agarrar" (ex.: pinça): segurou `segurar` s, agarra; subir/descer a
+    mão emite `<pose>_mais` / `<pose>_menos` a cada `passo` (fração da altura da
+    imagem). Falhas de até `tolerancia` s no meio do movimento não soltam."""
+
+    def __init__(self, pose, segurar=0.3, passo=0.04, tolerancia=0.3):
+        self.pose, self.segurar, self.passo, self.tolerancia = pose, segurar, passo, tolerancia
+        self.agarrado = False
+        self._desde = self._visto = 0.0
+        self._ancora = None
+
+    def __call__(self, bruta, pontos, agora):
+        if bruta == self.pose and pontos:
+            # ponto de pega: meio entre as pontas do polegar e do indicador
+            y = (pontos[4].y + pontos[8].y) / 2
+            if not self._visto or agora - self._visto > self.tolerancia:
+                self._desde = agora
+            self._visto = agora
+            if not self.agarrado:
+                if agora - self._desde >= self.segurar:
+                    self.agarrado, self._ancora = True, y
+                return []
+            passos = int((self._ancora - y) / self.passo)
+            if passos:
+                self._ancora -= passos * self.passo
+                return [f"{self.pose}_mais" if passos > 0 else f"{self.pose}_menos"] * min(abs(passos), 3)
+            return []
+        if self.agarrado and agora - self._visto > self.tolerancia:
+            self.agarrado, self._ancora = False, None
+        return []
+
+
 class MotorPoses:
-    def __init__(self, modelo_mp, poses, confianca_min=0.8, quadros_estaveis=4):
+    def __init__(self, modelo_mp, poses, confianca_min=0.8, quadros_estaveis=4, arrastos=None):
         import mediapipe as mp
         from mediapipe.tasks.python import BaseOptions
         from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions, RunningMode
@@ -51,6 +83,7 @@ class MotorPoses:
         ))
         self.classificador = ClassificadorPoses()
         self.segurador = Segurador(poses, quadros_estaveis)
+        self.arrastos = [Arrasto(nome, **cfg) for nome, cfg in (arrastos or {}).items()]
         self.confianca_min = confianca_min
         self.inicio = time.monotonic()
         self.ultimo_ts = -1
@@ -72,7 +105,10 @@ class MotorPoses:
         self.mundo = r.hand_world_landmarks[0] if r.hand_world_landmarks else None
         classe, self.confianca = self.classificador(self.pontos, self.mundo)
         self.bruta = classe if self.confianca >= self.confianca_min else None
-        return self.segurador(self.bruta, agora)
+        eventos = self.segurador(self.bruta, agora)
+        for arrasto in self.arrastos:
+            eventos += arrasto(self.bruta, self.pontos, agora)
+        return eventos
 
     def registro(self):
         return {

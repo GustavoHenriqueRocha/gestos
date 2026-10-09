@@ -121,6 +121,7 @@ def main() -> None:
             poses={nome: regra for nome, regra in gestos.items() if "segurar" in regra},
             confianca_min=motor_cfg.get("confianca_min", 0.8),
             quadros_estaveis=motor_cfg.get("quadros_estaveis", 4),
+            arrastos=config.get("arrastar", {}),
         )
     else:
         from .motor_hagrid import MotorHagrid
