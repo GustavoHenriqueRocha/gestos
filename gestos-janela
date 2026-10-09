@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Liga/desliga a janelinha de pré-visualização do serviço de gestos.
+systemctl --user is-active --quiet gestos || { notify-send -a Gestos "Gestos está desligado" "Ligue com Super+Ctrl+G"; exit 1; }
+systemctl --user kill -s USR1 gestos

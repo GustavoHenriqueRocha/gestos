@@ -13,6 +13,7 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
+from . import visual
 from .reconhecedor import Reconhecedor
 
 MODELO_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
@@ -96,6 +97,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, help="arquivo TOML (padrão: ~/.config/gestos/gestos.toml)")
     parser.add_argument("--debug", action="store_true", help="mostra a pose detectada a cada mudança")
     parser.add_argument("--simular", action="store_true", help="reconhece mas não executa comandos")
+    parser.add_argument("--janela", action="store_true", help="começa com a pré-visualização aberta")
     parser.add_argument("--gravar", type=Path, help="salva os pontos da mão de cada quadro (JSONL) para análise")
     args = parser.parse_args()
 
@@ -142,6 +144,9 @@ def main() -> None:
     quadros, relogio_fps = 0, time.monotonic()
     # SIGTERM (systemctl stop, kill) encerra igual ao Ctrl+C, fechando câmera e gravação
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))
+    # SIGUSR1 liga/desliga a pré-visualização (gestos-janela)
+    janela = {"ligada": args.janela, "ultimo": ""}
+    signal.signal(signal.SIGUSR1, lambda *_: janela.update(ligada=not janela["ligada"]))
     gravacao = open(args.gravar, "w") if args.gravar else None
     print("Gestos ativo.", flush=True)
 
@@ -166,6 +171,8 @@ def main() -> None:
                 pts = [[round(q.x, 4), round(q.y, 4)] for q in pontos] if pontos else None
                 m3 = [[round(q.x, 4), round(q.y, 4), round(q.z, 4)] for q in mundo] if mundo else None
                 gravacao.write(json.dumps({"t": ts, "w": round(time.time(), 3), "pose": reconhecedor._pose, "eventos": eventos, "p": pts, "m": m3}) + "\n")
+            if eventos:
+                janela["ultimo"] = eventos[-1]
             for gesto in eventos:
                 if args.simular:
                     print(f"[gesto] {gesto}", flush=True)
@@ -174,6 +181,14 @@ def main() -> None:
             if painel and reconhecedor._pose != pose_painel:
                 pose_painel = reconhecedor._pose
                 painel.atualizar(pose=pose_painel)
+            if janela["ligada"]:
+                linhas = [f"pose: {reconhecedor._pose or '-'}", f"ultimo gesto: {janela['ultimo'] or '-'}"]
+                if not visual.mostrar(visual.desenhar(quadro, reconhecedor.pontos, linhas)):
+                    janela["ligada"] = False
+                janela["aberta"] = True
+            elif janela.get("aberta"):
+                visual.fechar()
+                janela["aberta"] = False
 
             if args.debug:
                 quadros += 1

@@ -10,6 +10,7 @@ import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 # Índices dos pontos da mão no MediaPipe
 PULSO = 0
@@ -91,6 +92,54 @@ def classificar_pose(p):
     return None
 
 
+class FiltroUmEuro:
+    """Filtro One Euro (Casiez et al., 2012): suaviza a tremedeira com a mão
+    parada sem atrasar o movimento rápido (o corte sobe com a velocidade)."""
+
+    def __init__(self, corte_min=1.5, beta=0.5, corte_d=1.0):
+        self.corte_min, self.beta, self.corte_d = corte_min, beta, corte_d
+        self.x = self.dx = self.t = None
+
+    @staticmethod
+    def _alfa(corte, dt):
+        tau = 1 / (2 * math.pi * corte)
+        return 1 / (1 + tau / dt)
+
+    def __call__(self, x, t):
+        if self.t is None or t <= self.t:
+            self.x, self.dx, self.t = x, [0.0] * len(x), t
+            return x
+        dt = t - self.t
+        self.t = t
+        a_d = self._alfa(self.corte_d, dt)
+        dx = [(xi - pi) / dt for xi, pi in zip(x, self.x)]
+        self.dx = [a_d * d + (1 - a_d) * pd for d, pd in zip(dx, self.dx)]
+        saida = []
+        for xi, pi, di in zip(x, self.x, self.dx):
+            a = self._alfa(self.corte_min + self.beta * abs(di), dt)
+            saida.append(a * xi + (1 - a) * pi)
+        self.x = saida
+        return saida
+
+
+class FiltroMao:
+    """Aplica o One Euro em cada coordenada dos 21 pontos; esquece ao perder a mão."""
+
+    def __init__(self, corte_min=1.5, beta=0.5, dims=2):
+        self.args, self.dims, self.filtro = (corte_min, beta), dims, None
+
+    def __call__(self, pontos, t):
+        if not pontos:
+            self.filtro = None
+            return pontos
+        if self.filtro is None:
+            self.filtro = FiltroUmEuro(*self.args)
+        campos = "xyz"[: self.dims]
+        plano = [getattr(q, c) for q in pontos for c in campos]
+        f = self.filtro(plano, t)
+        return [SimpleNamespace(**dict(zip(campos, f[i * self.dims:(i + 1) * self.dims]))) for i in range(len(pontos))]
+
+
 @dataclass
 class Reconhecedor:
     """Acompanha as poses ao longo do tempo e emite eventos de gesto."""
@@ -104,6 +153,9 @@ class Reconhecedor:
     rolar_velocidade: float = 4.5  # passos de rolagem por quadro, por unidade além da zona morta
     pinca_repetir: float = 0.4  # segurando a pinça na zona final, repete a cada X s (0 desliga)
     frames_estaveis: int = 3
+    suavizar: bool = False  # ligar depois de calibrar (os limites atuais foram ajustados sem filtro)
+    suavizar_corte: float = 1.5  # Hz com a mão parada (menor = mais suave)
+    suavizar_beta: float = 0.5  # quanto o corte sobe com a velocidade (maior = menos atraso)
 
     _pose: str | None = None
     _candidata: str | None = None
@@ -143,6 +195,13 @@ class Reconhecedor:
         `mundo` são os mesmos pontos em 3D (metros, hand_world_landmarks); com
         eles a maçaneta mede o giro da palma em torno do antebraço."""
         agora = time.monotonic() if agora is None else agora
+        if self.suavizar:
+            if not hasattr(self, "_filtro2d"):
+                self._filtro2d = FiltroMao(self.suavizar_corte, self.suavizar_beta, 2)
+                self._filtro3d = FiltroMao(self.suavizar_corte, self.suavizar_beta, 3)
+            pontos = self._filtro2d(pontos, agora)
+            mundo = self._filtro3d(mundo, agora) if mundo else self._filtro3d(None, agora)
+        self.pontos = pontos  # suavizados, para quem quiser desenhar
         pose = classificar_pose(pontos) if pontos else None
         if mundo:
             self._palmas.append((agora, angulo_palma(mundo)))
