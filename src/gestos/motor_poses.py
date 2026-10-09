@@ -95,6 +95,7 @@ class ArrastoJanela:
         self._ultimo = None  # (x, y) da mão no último movimento
         self._resto = [0.0, 0.0]
         self._tela = None
+        self._flutuadas = set()  # janelas que este código fez flutuar (voltam ao mosaico ao soltar)
 
     def __call__(self, bruta, pontos, agora):
         if pontos and sum(dedo_esticado(pontos, d) for d in (INDICADOR, MEDIO, ANELAR, MINIMO)) >= 4:
@@ -119,8 +120,10 @@ class ArrastoJanela:
         if not janela.get("address"):
             return
         self.endereco = janela["address"]
-        self._era_flutuante = bool(janela.get("floating"))
+        # flutuante "de verdade" só se já era antes e não fomos nós que fizemos flutuar
+        self._era_flutuante = bool(janela.get("floating")) and self.endereco not in self._flutuadas
         if not janela.get("floating"):
+            self._flutuadas.add(self.endereco)
             _hypr("dispatch", f'hl.dsp.window.float({{ action = "enable", window = "address:{self.endereco}" }})')
         monitor = next((m for m in json.loads(_hypr("monitors", "-j") or "[]") if m.get("focused")), None)
         if monitor:
@@ -156,6 +159,7 @@ class ArrastoJanela:
                                 str(alvo_x - cx), str(alvo_y - cy)], capture_output=True, timeout=2)
                 time.sleep(0.03)
             _hypr("dispatch", f'hl.dsp.window.float({{ action = "disable", window = "address:{endereco}" }})')
+            self._flutuadas.discard(endereco)
         if self.avisar:
             self.avisar("✋ soltou a janela")
 
