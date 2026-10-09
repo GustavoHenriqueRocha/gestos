@@ -9,9 +9,13 @@ LIGACOES = [
 JANELA = "Gestos"
 
 
-def desenhar(quadro, pontos, linhas, destaque=None, cor_destaque=(0, 200, 255)):
-    """Desenha a mão e as linhas de texto no quadro (BGR, já espelhado). Devolve o quadro."""
+def desenhar(quadro, pontos, linhas, destaque=None, cor_destaque=(0, 200, 255), caixa=None, rotulo_caixa=""):
+    """Desenha a mão (pontos ou caixa) e as linhas de texto no quadro (BGR, já espelhado)."""
     h, w = quadro.shape[:2]
+    if caixa:
+        x1, y1, x2, y2 = caixa
+        cv2.rectangle(quadro, (x1, y1), (x2, y2), (80, 220, 80), 3)
+        _texto(quadro, rotulo_caixa, (x1, max(20, y1 - 8)), 0.7, (80, 255, 80))
     if pontos:
         xy = [(int(q.x * w), int(q.y * h)) for q in pontos]
         for a, b in LIGACOES:

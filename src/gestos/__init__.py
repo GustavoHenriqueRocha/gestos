@@ -14,7 +14,6 @@ import urllib.request
 from pathlib import Path
 
 from . import visual
-from .reconhecedor import Reconhecedor
 
 MODELO_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 MODELO = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "gestos" / "hand_landmarker.task"
@@ -109,17 +108,19 @@ def main() -> None:
     print(f"Config: {caminho}", flush=True)
 
     import cv2
-    import mediapipe as mp
-    from mediapipe.tasks.python import BaseOptions
-    from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions, RunningMode
 
-    detector = HandLandmarker.create_from_options(HandLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(baixar_modelo())),
-        running_mode=RunningMode.VIDEO,
-        num_hands=1,
-        min_hand_detection_confidence=0.6,
-        min_tracking_confidence=0.5,
-    ))
+    motor_cfg = config.get("motor", {})
+    if motor_cfg.get("tipo", "hagrid") == "mediapipe":
+        from .motor_mediapipe import MotorMediapipe
+        motor = MotorMediapipe(baixar_modelo(), ajustes)
+    else:
+        from .motor_hagrid import MotorHagrid
+        motor = MotorHagrid(
+            poses={nome: regra for nome, regra in gestos.items() if "segurar" in regra},
+            confianca_min=motor_cfg.get("confianca_min", 0.6),
+            quadros_estaveis=motor_cfg.get("quadros_estaveis", 4),
+        )
+    print(f"Motor: {type(motor).__name__}", flush=True)
 
     captura = cv2.VideoCapture(cam.get("dispositivo", 0), cv2.CAP_V4L2)
     captura.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -128,18 +129,9 @@ def main() -> None:
     if not captura.isOpened():
         sys.exit("Não consegui abrir a câmera")
 
-    reconhecedor = Reconhecedor(
-        swipe_distancia=ajustes.get("swipe_distancia", 0.15),
-        segurar=ajustes.get("segurar", 0.8),
-        pinca_janela=ajustes.get("pinca_janela", 1.0),
-        pinca_repetir=ajustes.get("pinca_repetir", 0.4),
-        rolar_zona_morta=ajustes.get("rolar_zona_morta", 0.04),
-        rolar_velocidade=ajustes.get("rolar_velocidade", 4.5),
-    )
     painel = Painel() if ajustes.get("notificar", True) and not args.simular else None
     pose_painel = object()
     inicio = time.monotonic()
-    ultimo_ts = -1
     pose_anterior = None
     quadros, relogio_fps = 0, time.monotonic()
     # SIGTERM (systemctl stop, kill) encerra igual ao Ctrl+C, fechando câmera e gravação
@@ -157,20 +149,11 @@ def main() -> None:
                 time.sleep(0.05)
                 continue
             quadro = cv2.flip(quadro, 1)  # espelha: direita na imagem = direita do usuário
-            rgb = cv2.cvtColor(quadro, cv2.COLOR_BGR2RGB)
-            ts = int((time.monotonic() - inicio) * 1000)
-            if ts <= ultimo_ts:
-                ts = ultimo_ts + 1
-            ultimo_ts = ts
-            resultado = detector.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
-            pontos = resultado.hand_landmarks[0] if resultado.hand_landmarks else None
-            mundo = resultado.hand_world_landmarks[0] if resultado.hand_world_landmarks else None
-
-            eventos = reconhecedor.atualizar(pontos, mundo=mundo)
+            agora = time.monotonic()
+            eventos = motor.processar(quadro, agora)
             if gravacao:
-                pts = [[round(q.x, 4), round(q.y, 4)] for q in pontos] if pontos else None
-                m3 = [[round(q.x, 4), round(q.y, 4), round(q.z, 4)] for q in mundo] if mundo else None
-                gravacao.write(json.dumps({"t": ts, "w": round(time.time(), 3), "pose": reconhecedor._pose, "eventos": eventos, "p": pts, "m": m3}) + "\n")
+                gravacao.write(json.dumps({"t": int((agora - inicio) * 1000), "w": round(time.time(), 3), "pose": motor.pose,
+                                           "eventos": eventos, **motor.registro()}) + "\n")
             if eventos:
                 janela["ultimo"] = eventos[-1]
             for gesto in eventos:
@@ -178,12 +161,13 @@ def main() -> None:
                     print(f"[gesto] {gesto}", flush=True)
                 else:
                     executar(gesto, gestos, painel)
-            if painel and reconhecedor._pose != pose_painel:
-                pose_painel = reconhecedor._pose
+            if painel and motor.pose != pose_painel:
+                pose_painel = motor.pose
                 painel.atualizar(pose=pose_painel)
             if janela["ligada"]:
-                linhas = [f"pose: {reconhecedor._pose or '-'}", f"ultimo gesto: {janela['ultimo'] or '-'}"]
-                if not visual.mostrar(visual.desenhar(quadro, reconhecedor.pontos, linhas)):
+                linhas = [f"pose: {motor.pose or '-'}", f"ultimo gesto: {janela['ultimo'] or '-'}"]
+                rotulo_caixa = f"{getattr(motor, 'bruta', None) or '?'} {motor.confianca:.0%}"
+                if not visual.mostrar(visual.desenhar(quadro, motor.pontos, linhas, caixa=motor.caixa, rotulo_caixa=rotulo_caixa)):
                     janela["ligada"] = False
                 janela["aberta"] = True
             elif janela.get("aberta"):
@@ -192,8 +176,8 @@ def main() -> None:
 
             if args.debug:
                 quadros += 1
-                if reconhecedor._pose != pose_anterior:
-                    pose_anterior = reconhecedor._pose
+                if motor.pose != pose_anterior:
+                    pose_anterior = motor.pose
                     print(f"[pose] {pose_anterior}", flush=True)
                 if time.monotonic() - relogio_fps >= 5:
                     print(f"[fps] {quadros / (time.monotonic() - relogio_fps):.1f}", flush=True)
@@ -206,4 +190,4 @@ def main() -> None:
         if painel:
             painel.fechar()
         captura.release()
-        detector.close()
+        motor.fechar()

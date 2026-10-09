@@ -1,8 +1,27 @@
 # Gestos → comandos. Copiado para ~/.config/gestos/gestos.toml na instalação;
-# edite lá. O serviço relê o arquivo ao reiniciar (Super+Ctrl+G duas vezes).
+# edite lá. Reinicie com Super+Ctrl+G duas vezes para aplicar.
 #
-# Cada gesto tem um comando de shell e um rótulo opcional mostrado na
-# notificação. Apague ou comente um gesto para desativá-lo.
+# Motor "hagrid": modelos treinados do HaGRID (ai-forever/dynamic_gestures).
+# Dois tipos de gesto:
+#  - POSE segurada: o nome é a pose (lista abaixo). "segurar" = segundos até
+#    disparar; "repetir" = repete a cada X s enquanto segura (0 = uma vez só).
+#  - Gesto DINÂMICO: swipe_esquerda, swipe_direita, swipe_cima, swipe_baixo,
+#    swipe_rapido_cima, swipe_rapido_baixo, zoom_mais, zoom_menos, toque,
+#    toque_duplo, arrastar, soltar.
+#
+# Poses que o modelo conhece: like dislike ok peace peace_inverted palm stop
+# stop_inverted fist fist_inverted one one_down one_left one_right point
+# two_up two_up_inverted two_left two_right two_down three three2 three3
+# three_gun four rock call mute little_finger middle_finger grip grabbing
+# thumb_index thumb_left thumb_right thumb_down hand_down hand_left hand_right
+# half_up half_down half_left half_right part_hand_heart part_hand_heart2
+#
+# Para voltar ao motor antigo (MediaPipe + regras), use gestos-mediapipe.toml.
+
+[motor]
+tipo = "hagrid"
+confianca_min = 0.6     # palpites do modelo abaixo disso são ignorados
+quadros_estaveis = 4    # quadros seguidos com a mesma pose para valer
 
 [camera]
 dispositivo = 0
@@ -11,73 +30,64 @@ altura = 480
 
 [ajustes]
 notificar = true
-swipe_distancia = 0.25  # quanto a mão precisa andar (fração da largura da imagem)
-segurar = 0.8           # segundos parado para mão aberta / joinha / punho
-pinca_janela = 1.0      # segundos para ir de pinça fechada (pontas encostadas) a aberta ("L") e vice-versa
-rolar_zona_morta = 0.04 # quanto subir/descer a mão (dois dedos) antes de começar a rolar
-rolar_velocidade = 4.5 # mais alto = rola mais rápido
-pinca_repetir = 0.4     # segurando a pinça na posição final, repete o passo a cada X s (0 desliga)
 
-# Mão aberta girando como maçaneta: horário = aba/janela da direita
-[gestos.macaneta_horario]
-rotulo = "🔄 → Janela da direita"
+# 👍 / 👎 segurando: volume sobe / desce enquanto segura
+[gestos.like]
+rotulo = "👍 volume +"
+comando = "omarchy-audio-output-volume +5"
+segurar = 0.5
+repetir = 0.3
+
+[gestos.dislike]
+rotulo = "👎 volume −"
+comando = "omarchy-audio-output-volume -5"
+segurar = 0.5
+repetir = 0.3
+
+# ☝ / 👇 segurando: rola a janela ativa para cima / baixo enquanto segura
+[gestos.one]
+rotulo = "☝ rolando ↑"
+comando = "~/.local/bin/gestos-rolar -15"
+segurar = 0.3
+repetir = 0.1
+
+[gestos.one_down]
+rotulo = "👇 rolando ↓"
+comando = "~/.local/bin/gestos-rolar 15"
+segurar = 0.3
+repetir = 0.1
+
+# Mão de lado varrendo (como no celular): da direita para a esquerda = vai
+# para a janela da DIREITA. Troque os comandos se preferir o contrário.
+[gestos.swipe_esquerda]
+rotulo = "👋 → janela da direita"
 comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"r\" })'"
 
-[gestos.macaneta_anti_horario]
-rotulo = "🔄 ← Janela da esquerda"
+[gestos.swipe_direita]
+rotulo = "👋 ← janela da esquerda"
 comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"l\" })'"
 
-# Dois dedos girando em círculo: rolagem contínua
-[gestos.giro_horario]
-rotulo = "🌀 rolando ↓"
-comando = "~/.local/bin/gestos-rolar 15"
+# ✌ segurando: play/pause
+[gestos.peace]
+rotulo = "✌ play/pause"
+comando = "omarchy-shell media playPause"
+segurar = 0.8
 
-[gestos.giro_anti_horario]
-rotulo = "🌀 rolando ↑"
-comando = "~/.local/bin/gestos-rolar -15"
+# 👌 segurando: menu do Omarchy
+[gestos.ok]
+rotulo = "👌 menu"
+comando = "omarchy-menu toggle"
+segurar = 0.8
 
-# Swipes laterais desligados (a maçaneta faz a troca); descomente para usar
-# [gestos.swipe_esquerda]
-# rotulo = "✌ ← Janela da esquerda"
-# comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"l\" })'"
-#
-# [gestos.swipe_direita]
-# rotulo = "✌ → Janela da direita"
-# comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"r\" })'"
-
-[gestos.rolar_cima]
-rotulo = "✌ rolando ↑"
-comando = "~/.local/bin/gestos-rolar -15"
-
-[gestos.rolar_baixo]
-rotulo = "✌ rolando ↓"
-comando = "~/.local/bin/gestos-rolar 15"
-
-# Swipes verticais livres (a rolagem usa o movimento vertical dos dois dedos)
+# Outros exemplos (descomente para usar)
 # [gestos.swipe_cima]
-# rotulo = "✌ ↑ Tela cheia"
+# rotulo = "🖐 ↑ tela cheia"
 # comando = "hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = \"fullscreen\" })'"
 #
-# [gestos.swipe_baixo]
-# rotulo = "✌ ↓ Scratchpad"
-# comando = "hyprctl dispatch 'hl.dsp.workspace.toggle_special(\"scratchpad\")'"
-
-[gestos.pinca_abrir]
-rotulo = "🤏 volume +"
-comando = "omarchy-audio-output-volume +10"
-
-[gestos.pinca_fechar]
-rotulo = "🤏 volume −"
-comando = "omarchy-audio-output-volume -10"
-
-[gestos.mao_aberta]
-rotulo = "✋ Menu do Omarchy"
-comando = "omarchy-menu toggle"
-
-[gestos.joinha]
-rotulo = "👍 Play/Pause"
-comando = "omarchy-shell media playPause"
-
-# [gestos.punho]
-# rotulo = "✊ Fechar janela"
-# comando = "hyprctl dispatch 'hl.dsp.window.close()'"
+# [gestos.zoom_mais]
+# comando = "wtype -M ctrl + -m ctrl"
+#
+# [gestos.rock]
+# rotulo = "🤘 workspace seguinte"
+# comando = "hyprctl dispatch 'hl.dsp.focus({ workspace = \"e+1\" })'"
+# segurar = 0.8

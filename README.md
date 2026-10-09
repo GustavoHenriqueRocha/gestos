@@ -2,19 +2,25 @@
 
 Controle do Omarchy (Hyprland) por gestos de mão na webcam, usando MediaPipe Hands.
 
+Motor padrão: modelos treinados do [HaGRID](https://github.com/hukenovs/hagrid)
+([ai-forever/dynamic_gestures](https://github.com/ai-forever/dynamic_gestures), Apache 2.0,
+código em `src/gestos/hagrid/`) — detector de mãos + classificador de 45 poses + gestos
+dinâmicos. ~6 ms por quadro na CPU.
+
 | Gesto | Ação padrão |
 |---|---|
-| 🔄 girar o pulso como chave ou maçaneta (dois dedos ou mão aberta; horário / anti-horário) | Janela da direita / esquerda (como Super+setas); voltar ao neutro não dispara |
-| ✌🌀 dois dedos girando em círculo (horário / anti-horário) | Rolagem contínua para baixo / cima |
-| ✌ dois dedos parados, mão sobe / desce | Rolagem joystick |
-| 🤏 pontas encostadas → "L" aberto / "L" → encostadas (segurar repete) | Volume +10 / −10 |
-| ✋ mão aberta em pé, dedos afastados, parada (0,8 s) | Menu do Omarchy |
-| 👍 joinha parado (0,8 s) | Play/Pause |
-| ✌ swipe lateral, ✊ punho | (livres, configuráveis) |
+| 👍 / 👎 segurando | Volume + / − (repete enquanto segura) |
+| ☝ / 👇 segurando | Rola a janela ativa para cima / baixo |
+| 👋 mão de lado varrendo para a esquerda / direita | Janela da direita / esquerda (como no celular) |
+| ✌ segurando | Play/Pause |
+| 👌 segurando | Menu do Omarchy |
 
-Uma notificação fixa no canto mostra a pose atual e o último gesto reconhecido.
-A rolagem usa `wlrctl` compilado com rolagem de rodinha (`~/.local/bin/wlrctl-roda`,
-ver `wlrctl-roda.patch`).
+Qualquer uma das 45 poses ou dos gestos dinâmicos pode ser ligada a um comando em
+`~/.config/gestos/gestos.toml`. O motor antigo (MediaPipe + regras próprias, com pinça,
+maçaneta e giro) continua disponível: `gestos-mediapipe.toml`.
+
+Uma notificação fixa no canto mostra a pose atual e o último gesto; `Super+Ctrl+Alt+G`
+abre a janelinha com a câmera, a caixa da mão, a pose e a confiança.
 
 ## Uso
 
