@@ -4,12 +4,17 @@ Controle do Omarchy (Hyprland) por gestos de mão na webcam, usando MediaPipe Ha
 
 | Gesto | Ação padrão |
 |---|---|
-| ✌ dois dedos → / ← | Foco na janela da direita / esquerda (como Super+setas) |
-| ✌ dois dedos parados, mão sobe / desce | Rolagem (joystick; precisa do `wlrctl`) |
+| ✋🔄 mão aberta girando como maçaneta (horário / anti-horário) | Janela da direita / esquerda (como Super+setas); voltar ao neutro não dispara |
+| ✌🌀 dois dedos girando em círculo (horário / anti-horário) | Rolagem contínua para baixo / cima |
+| ✌ dois dedos parados, mão sobe / desce | Rolagem joystick |
 | 🤏 pontas encostadas → "L" aberto / "L" → encostadas (segurar repete) | Volume +10 / −10 |
-| ✋ mão aberta parada (0,8 s) | Menu do Omarchy |
+| ✋ mão aberta em pé, dedos afastados, parada (0,8 s) | Menu do Omarchy |
 | 👍 joinha parado (0,8 s) | Play/Pause |
-| ✊ punho | (livre, configurável) |
+| ✌ swipe lateral, ✊ punho | (livres, configuráveis) |
+
+Uma notificação fixa no canto mostra a pose atual e o último gesto reconhecido.
+A rolagem usa `wlrctl` compilado com rolagem de rodinha (`~/.local/bin/wlrctl-roda`,
+ver `wlrctl-roda.patch`).
 
 ## Uso
 

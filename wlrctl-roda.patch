@@ -1,0 +1,33 @@
+--- orig/wlrctl-v0.2.2/pointer.c	2023-05-16 04:22:29.000000000 -0300
++++ wlrctl-v0.2.2/pointer.c	2026-10-09 11:10:31.559637340 -0300
+@@ -155,25 +155,17 @@
+ static void
+ pointer_scroll(struct zwlr_virtual_pointer_v1 *vptr, wl_fixed_t dy, wl_fixed_t dx)
+ {
++	/* Rolagem como rodinha de mouse (WHEEL + discrete), que os apps tratam
++	 * como cliques da roda; a versão original usa FINGER e muitos ignoram. */
+ 	if (!dx && !dy) {
+ 		return;
+ 	}
++	zwlr_virtual_pointer_v1_axis_source(vptr, WL_POINTER_AXIS_SOURCE_WHEEL);
+ 	if (dx) {
+-		zwlr_virtual_pointer_v1_axis_source(vptr, WL_POINTER_AXIS_SOURCE_FINGER);
+-		zwlr_virtual_pointer_v1_axis(vptr, timestamp(), WL_POINTER_AXIS_HORIZONTAL_SCROLL, dx);
++		zwlr_virtual_pointer_v1_axis_discrete(vptr, timestamp(), WL_POINTER_AXIS_HORIZONTAL_SCROLL, dx, dx > 0 ? 1 : -1);
+ 	}
+ 	if (dy) {
+-		zwlr_virtual_pointer_v1_axis_source(vptr, WL_POINTER_AXIS_SOURCE_FINGER);
+-		zwlr_virtual_pointer_v1_axis(vptr, timestamp(), WL_POINTER_AXIS_VERTICAL_SCROLL, dy);
+-	}
+-	zwlr_virtual_pointer_v1_frame(vptr);
+-	if (dx) {
+-		zwlr_virtual_pointer_v1_axis_source(vptr, WL_POINTER_AXIS_SOURCE_FINGER);
+-		zwlr_virtual_pointer_v1_axis_stop(vptr, timestamp(), WL_POINTER_AXIS_HORIZONTAL_SCROLL);
+-	}
+-	if (dy) {
+-		zwlr_virtual_pointer_v1_axis_source(vptr, WL_POINTER_AXIS_SOURCE_FINGER);
+-		zwlr_virtual_pointer_v1_axis_stop(vptr, timestamp(), WL_POINTER_AXIS_VERTICAL_SCROLL);
++		zwlr_virtual_pointer_v1_axis_discrete(vptr, timestamp(), WL_POINTER_AXIS_VERTICAL_SCROLL, dy, dy > 0 ? 1 : -1);
+ 	}
+ 	zwlr_virtual_pointer_v1_frame(vptr);
+ }

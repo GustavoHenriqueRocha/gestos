@@ -11,28 +11,47 @@ altura = 480
 
 [ajustes]
 notificar = true
-swipe_distancia = 0.15  # quanto a mão precisa andar (fração da largura da imagem)
+swipe_distancia = 0.25  # quanto a mão precisa andar (fração da largura da imagem)
 segurar = 0.8           # segundos parado para mão aberta / joinha / punho
 pinca_janela = 1.0      # segundos para ir de pinça fechada (pontas encostadas) a aberta ("L") e vice-versa
 rolar_zona_morta = 0.04 # quanto subir/descer a mão (dois dedos) antes de começar a rolar
 rolar_velocidade = 4.5 # mais alto = rola mais rápido
 pinca_repetir = 0.4     # segurando a pinça na posição final, repete o passo a cada X s (0 desliga)
 
-[gestos.swipe_esquerda]
-rotulo = "✌ ← Janela da esquerda"
-comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"l\" })'"
-
-[gestos.swipe_direita]
-rotulo = "✌ → Janela da direita"
+# Mão aberta girando como maçaneta: horário = aba/janela da direita
+[gestos.macaneta_horario]
+rotulo = "🔄 → Janela da direita"
 comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"r\" })'"
 
-# Dois dedos parados e mão subindo/descendo = rolagem (joystick).
-# Troque cima/baixo se preferir a rolagem "natural".
+[gestos.macaneta_anti_horario]
+rotulo = "🔄 ← Janela da esquerda"
+comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"l\" })'"
+
+# Dois dedos girando em círculo: rolagem contínua
+[gestos.giro_horario]
+rotulo = "🌀 rolando ↓"
+comando = "~/.local/bin/wlrctl-roda pointer scroll 15"
+
+[gestos.giro_anti_horario]
+rotulo = "🌀 rolando ↑"
+comando = "~/.local/bin/wlrctl-roda pointer scroll -15"
+
+# Swipes laterais desligados (a maçaneta faz a troca); descomente para usar
+# [gestos.swipe_esquerda]
+# rotulo = "✌ ← Janela da esquerda"
+# comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"l\" })'"
+#
+# [gestos.swipe_direita]
+# rotulo = "✌ → Janela da direita"
+# comando = "hyprctl dispatch 'hl.dsp.focus({ direction = \"r\" })'"
+
 [gestos.rolar_cima]
-comando = "wlrctl pointer scroll -15"
+rotulo = "✌ rolando ↑"
+comando = "~/.local/bin/wlrctl-roda pointer scroll -15"
 
 [gestos.rolar_baixo]
-comando = "wlrctl pointer scroll 15"
+rotulo = "✌ rolando ↓"
+comando = "~/.local/bin/wlrctl-roda pointer scroll 15"
 
 # Swipes verticais livres (a rolagem usa o movimento vertical dos dois dedos)
 # [gestos.swipe_cima]
@@ -44,9 +63,11 @@ comando = "wlrctl pointer scroll 15"
 # comando = "hyprctl dispatch 'hl.dsp.workspace.toggle_special(\"scratchpad\")'"
 
 [gestos.pinca_abrir]
+rotulo = "🤏 volume +"
 comando = "omarchy-audio-output-volume +10"
 
 [gestos.pinca_fechar]
+rotulo = "🤏 volume −"
 comando = "omarchy-audio-output-volume -10"
 
 [gestos.mao_aberta]

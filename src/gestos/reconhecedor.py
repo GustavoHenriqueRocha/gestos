@@ -79,8 +79,11 @@ def classificar_pose(p):
     if not mao_inteira_visivel(p):
         return None  # poses paradas só com a mão inteira na imagem
     if indicador and medio and anelar and minimo and polegar:
-        # dedos para cima; mão pendurada no pé da imagem não conta
-        return "mao_aberta" if p[MEDIO[3]].y < p[PULSO].y else None
+        # em pé (até 30° de inclinação) e dedos bem afastados: mão cruzada ou
+        # relaxada tem os dedos juntos e fica deitada
+        inclinacao = math.degrees(math.atan2(p[MEDIO[0]].x - p[PULSO].x, p[PULSO].y - p[MEDIO[0]].y))
+        afastados = dist(p[INDICADOR[3]], p[MINIMO[3]]) / s
+        return "mao_aberta" if abs(inclinacao) <= 30 and afastados >= 0.7 else None
     if not (indicador or medio or anelar or minimo):
         if polegar and p[POLEGAR[3]].y < p[POLEGAR[2]].y < p[POLEGAR[1]].y and p[POLEGAR[3]].y < p[INDICADOR[1]].y - 0.3 * s:
             return "joinha"
@@ -92,8 +95,9 @@ def classificar_pose(p):
 class Reconhecedor:
     """Acompanha as poses ao longo do tempo e emite eventos de gesto."""
 
-    swipe_distancia: float = 0.15  # fração da largura da imagem
-    swipe_janela: float = 0.6  # segundos para completar o movimento
+    swipe_distancia: float = 0.25  # fração da largura da imagem
+    swipe_janela: float = 0.5  # segundos para completar o movimento
+    swipe_volta: float = 2.0  # segundos em que a direção oposta é tratada como volta da mão
     segurar: float = 0.8  # segundos parado para mao_aberta/joinha/punho
     pinca_janela: float = 1.0  # segundos para ir de uma zona da pinça à outra
     rolar_zona_morta: float = 0.04  # quanto a mão sobe/desce antes de começar a rolar
@@ -111,17 +115,32 @@ class Reconhecedor:
     _repeticao: tuple = (None, 0.0)  # (evento, quando repetir) enquanto segura a pinça
     _rolar_centro: tuple | None = None  # (x, y) da mão quando a rolagem começou
     _rolar_cancelada: bool = False
+    # giro: pontas dos dois dedos no último segundo e ângulo acumulado
+    giro_passo: float = 60.0  # graus de giro por passo de rolagem
+    _giro_pontos: deque = field(default_factory=lambda: deque(maxlen=30))
+    _giro_acumulado: float = 0.0
+    _giro_angulo: float | None = None
+    _giro_recente: float = 0.0  # último instante em que houve giro de verdade
+    _giro_deltas: deque = field(default_factory=deque)  # (t, graus) do último segundo
+    # maçaneta: mão aberta girando a partir de um ângulo neutro
+    macaneta_limite: float = 50.0  # graus além do neutro para disparar
+    _mac_neutro: float | None = None
+    _mac_armada: bool = True
+    _mac_recentes: deque = field(default_factory=lambda: deque(maxlen=6))
+    _mac_visto: float = 0.0
+    _mac_pulso: deque = field(default_factory=lambda: deque(maxlen=15))  # (x, y) do pulso, ~0,5 s
     _rolar_acumulado: float = 0.0
     # swipe: posição e pose bruta dos últimos quadros com mão
     _rastro: deque = field(default_factory=lambda: deque(maxlen=60))
-    _repouso: tuple | None = None  # (t, x, y, pose) do último momento parado
+    _swipe_pausa: float = 0.0
     _ultimo_swipe: tuple = (0.0, None)  # (t, direção)
 
     def atualizar(self, pontos, agora=None):
         """Recebe os pontos (ou None se não há mão) e devolve a lista de eventos."""
         agora = time.monotonic() if agora is None else agora
         pose = classificar_pose(pontos) if pontos else None
-        eventos = self._swipe(pontos, pose, agora) + self._pinca(pontos, agora)
+        eventos = self._giro(pontos, pose, agora) + self._macaneta(pontos, agora)
+        eventos += self._swipe(pontos, pose, agora) + self._pinca(pontos, agora)
 
         # só troca de pose depois de alguns frames iguais, para não piscar
         if pose == self._candidata:
@@ -144,45 +163,143 @@ class Reconhecedor:
         return eventos
 
     def _swipe(self, p, pose, agora):
-        """Swipe = movimento rápido saindo do repouso, com dois dedos.
+        """Swipe = varredura longa, rápida e reta com dois dedos.
 
-        Durante o movimento a imagem borra e a pose some, então a pose é
-        conferida no repouso de onde o movimento saiu. A volta da mão (direção
-        oposta logo em seguida) é ignorada.
+        Não exige repouso antes: a mão costuma entrar já em movimento, vindo de
+        fora da imagem. Durante o movimento a imagem borra e a pose some, então
+        basta parte dos quadros com dois dedos. A volta da mão (direção oposta
+        logo em seguida) é ignorada.
         """
         if not p:
             self._rastro.clear()
-            self._repouso = None
             return []
         x = (p[INDICADOR[0]].x + p[MEDIO[0]].x) / 2  # base dos dedos: borra menos que as pontas
         y = (p[INDICADOR[0]].y + p[MEDIO[0]].y) / 2
         self._rastro.append((agora, x, y, pose))
-
-        recentes = [r for r in self._rastro if agora - r[0] <= 0.2]
-        if len(recentes) >= 3 and _amplitude(recentes) < 0.03:
-            self._repouso = (agora, x, y, pose)
-            return []
-        if self._repouso is None or agora - self._repouso[0] > self.swipe_janela:
+        if agora < self._swipe_pausa or agora - self._giro_recente < 0.5:
             return []
 
-        _, x0, y0, pose0 = self._repouso
+        trecho = [r for r in self._rastro if agora - r[0] <= self.swipe_janela]
+        _, x0, y0, _ = trecho[0]
         dx, dy = x - x0, y - y0
         if max(abs(dx), abs(dy)) < self.swipe_distancia:
             return []
-        movimento = [r[3] for r in self._rastro if r[0] >= self._repouso[0]]
-        if pose0 != "dois_dedos" and movimento.count("dois_dedos") < 0.4 * len(movimento):
+        if _curva(trecho) > 45:
+            return []  # caminho curvo: é giro, não swipe
+        poses = [r[3] for r in trecho]
+        if poses.count("dois_dedos") < 0.3 * len(poses):
             return []
 
         if abs(dx) > abs(dy):
             direcao = "swipe_direita" if dx > 0 else "swipe_esquerda"
         else:
             direcao = "swipe_baixo" if dy > 0 else "swipe_cima"
-        self._repouso = None  # precisa parar de novo para o próximo swipe
+        self._rastro.clear()
+        self._swipe_pausa = agora + 0.4  # termina a varredura sem disparar de novo
         t_ant, dir_ant = self._ultimo_swipe
-        if dir_ant == _OPOSTO[direcao] and agora - t_ant < 1.2:
-            return []  # é a mão voltando
+        if dir_ant == _OPOSTO[direcao] and agora - t_ant < self.swipe_volta:
+            self._ultimo_swipe = (agora, dir_ant)  # volta da mão: estende a espera
+            return []
         self._ultimo_swipe = (agora, direcao)
         return [direcao]
+
+    def _giro(self, p, pose, agora):
+        """Dois dedos girando em círculo: horário rola para baixo, anti-horário para cima.
+
+        O centro do círculo é a média das pontas no último segundo; cada
+        `giro_passo` graus acumulados no mesmo sentido viram um passo.
+        """
+        if not p or pose not in ("dois_dedos", None):
+            # um quadro ou outro com pose errada não interrompe o giro
+            if p and self._giro_pontos and agora - self._giro_pontos[-1][0] < 0.3:
+                return []
+            self._giro_pontos.clear()
+            self._giro_acumulado, self._giro_angulo = 0.0, None
+            self._giro_deltas.clear()
+            return []
+        if dedo_esticado(p, ANELAR) and dedo_esticado(p, MINIMO):
+            return []  # mão aberta girando é a maçaneta, não o giro dos dois dedos
+        x = (p[INDICADOR[3]].x + p[MEDIO[3]].x) / 2
+        y = (p[INDICADOR[3]].y + p[MEDIO[3]].y) / 2
+        self._giro_pontos.append((agora, x, y))
+        while self._giro_pontos and agora - self._giro_pontos[0][0] > 1.0:
+            self._giro_pontos.popleft()
+        if len(self._giro_pontos) < 10:
+            return []
+        cx = sum(g[1] for g in self._giro_pontos) / len(self._giro_pontos)
+        cy = sum(g[2] for g in self._giro_pontos) / len(self._giro_pontos)
+        if math.hypot(x - cx, y - cy) < 0.04:
+            return []  # perto demais do centro: ângulo não confiável
+        angulo = math.degrees(math.atan2(y - cy, x - cx))
+        if self._giro_angulo is None:
+            self._giro_angulo = angulo
+            return []
+        delta = (angulo - self._giro_angulo + 180) % 360 - 180
+        self._giro_angulo = angulo
+        if abs(delta) > 45:
+            return []  # salto: vai-e-vem em linha reta passa pelo centro e o ângulo pula 180°
+        self._giro_deltas.append((agora, delta))
+        while agora - self._giro_deltas[0][0] > 1.0:
+            self._giro_deltas.popleft()
+        if self._giro_acumulado and (delta > 0) != (self._giro_acumulado > 0):
+            self._giro_acumulado = 0.0  # mudou de sentido
+        self._giro_acumulado += delta
+        # só vale como giro com quase meia volta no mesmo sentido no último segundo
+        giro_total = abs(sum(d for _, d in self._giro_deltas))
+        if giro_total >= 100:
+            self._giro_recente = agora  # girando: segura swipe e joystick
+        if giro_total < 150:
+            # ainda não é giro: não guarda saldo para não soltar vários passos de uma vez
+            self._giro_acumulado = max(-self.giro_passo, min(self.giro_passo, self._giro_acumulado))
+            return []
+        if abs(self._giro_acumulado) < self.giro_passo:
+            self._giro_recente = agora
+            return []
+        self._giro_recente = agora
+        self._giro_acumulado -= math.copysign(self.giro_passo, self._giro_acumulado)
+        # y cresce para baixo, então ângulo crescendo = sentido horário na tela
+        return ["giro_horario" if delta > 0 else "giro_anti_horario"]
+
+    def _macaneta(self, p, agora):
+        """Mão aberta girando como maçaneta: além de `macaneta_limite` graus do
+        neutro dispara uma vez; voltar ao neutro rearma sem disparar nada."""
+        if p and escala(p) >= 0.12 and sum(dedo_esticado(p, d) for d in (INDICADOR, MEDIO, ANELAR, MINIMO)) >= 3:
+            angulo = math.degrees(math.atan2(p[MEDIO[0]].x - p[PULSO].x, p[PULSO].y - p[MEDIO[0]].y))
+        elif p and self._mac_neutro is not None and agora - self._mac_visto < 0.4:
+            return []  # no meio do giro os dedos borram: espera um pouco antes de esquecer
+        else:
+            if not p or agora - self._mac_visto > 0.4:
+                self._mac_neutro, self._mac_armada = None, True
+                self._mac_recentes.clear()
+                self._mac_pulso.clear()
+            return []
+        self._mac_visto = agora
+        self._mac_recentes.append(angulo)
+        self._mac_pulso.append((p[PULSO].x, p[PULSO].y))
+        if self._mac_neutro is None:
+            # neutro = ângulo da mão parada (6 quadros quase iguais)
+            if len(self._mac_recentes) == self._mac_recentes.maxlen and max(self._mac_recentes) - min(self._mac_recentes) < 10:
+                neutro = sum(self._mac_recentes) / len(self._mac_recentes)
+                # só com a mão para cima; pendurada ou deitada não vale
+                if -75 <= neutro <= 30:
+                    self._mac_neutro = neutro
+            return []
+        desvio = (angulo - self._mac_neutro + 180) % 360 - 180
+        if not self._mac_armada:
+            if abs(desvio) < 20:
+                self._mac_armada = True
+            return []
+        if abs(desvio) < 15:
+            self._mac_neutro += 0.05 * desvio  # neutro acompanha a mão devagar
+            return []
+        if abs(desvio) < self.macaneta_limite:
+            return []
+        xs = [q[0] for q in self._mac_pulso]
+        ys = [q[1] for q in self._mac_pulso]
+        if max(max(xs) - min(xs), max(ys) - min(ys)) > 0.25:
+            return []  # o pulso andou muito: é a mão passando (swipe), não girando
+        self._mac_armada = False
+        return ["macaneta_horario" if desvio > 0 else "macaneta_anti_horario"]
 
     def _rolagem(self, p, agora):
         """Joystick: com dois dedos, a distância vertical do ponto inicial dá a velocidade.
@@ -192,6 +309,8 @@ class Reconhecedor:
         """
         x = (p[INDICADOR[0]].x + p[MEDIO[0]].x) / 2
         y = (p[INDICADOR[0]].y + p[MEDIO[0]].y) / 2
+        if agora - self._giro_recente < 0.5:
+            self._rolar_cancelada = True  # está girando: o joystick fica de fora
         if self._rolar_cancelada or agora - self._inicio_pose < 0.3:
             return []
         if self._rolar_centro is None:
@@ -242,6 +361,17 @@ _OPOSTO = {
     "swipe_direita": "swipe_esquerda", "swipe_esquerda": "swipe_direita",
     "swipe_cima": "swipe_baixo", "swipe_baixo": "swipe_cima",
 }
+
+
+def _curva(trecho):
+    """Quanto a direção do movimento mudou (graus) entre a 1ª e a 2ª metade do trecho."""
+    if len(trecho) < 4:
+        return 0.0
+    meio = len(trecho) // 2
+    a, b, c = trecho[0], trecho[meio], trecho[-1]
+    d1 = math.atan2(b[2] - a[2], b[1] - a[1])
+    d2 = math.atan2(c[2] - b[2], c[1] - b[1])
+    return abs(math.degrees((d2 - d1 + math.pi) % (2 * math.pi) - math.pi))
 
 
 def _amplitude(rastro):

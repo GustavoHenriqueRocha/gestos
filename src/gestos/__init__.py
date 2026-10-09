@@ -3,9 +3,11 @@
 import argparse
 import json
 import os
+import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 import urllib.request
@@ -32,21 +34,61 @@ def baixar_modelo():
     return MODELO
 
 
-def notificar(texto):
-    subprocess.Popen(
-        ["notify-send", "-a", "Gestos", "-t", "900", "-h", "string:x-canonical-private-synchronous:gestos", texto],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+POSES = {
+    "dois_dedos": "✌ dois dedos", "pinca": "🤏 pinça", "mao_aberta": "✋ mão aberta",
+    "joinha": "👍 joinha", "punho": "✊ punho", None: "· sem gesto",
+}
 
 
-def executar(gesto, gestos, avisar):
+class Painel:
+    """Uma notificação fixa no canto, atualizada no lugar (notify-send -r),
+    mostrando a pose atual e o último gesto reconhecido."""
+
+    def __init__(self):
+        self.id = None
+        self.pose = None
+        self.gesto = ""
+        self._fila = queue.Queue(maxsize=1)
+        threading.Thread(target=self._enviar, daemon=True).start()
+
+    def atualizar(self, pose=..., gesto=None):
+        if pose is not ...:
+            self.pose = pose
+        if gesto:
+            self.gesto = f"{gesto}  ({time.strftime('%H:%M:%S')})"
+        try:
+            self._fila.get_nowait()  # só a versão mais nova importa
+        except queue.Empty:
+            pass
+        self._fila.put_nowait((POSES.get(self.pose, self.pose), self.gesto))
+
+    def _enviar(self):
+        while True:
+            titulo, corpo = self._fila.get()
+            cmd = ["notify-send", "-p", "-a", "Gestos", "-u", "low", "-t", "0"]
+            if self.id:
+                cmd += ["-r", self.id]
+            try:
+                saida = subprocess.run(cmd + [titulo, corpo or " "], capture_output=True, text=True, timeout=3)
+                self.id = saida.stdout.strip() or self.id
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+    def fechar(self):
+        if self.id:
+            subprocess.run(["notify-send", "-r", self.id, "-a", "Gestos", "-t", "1", "Gestos desligado"],
+                           capture_output=True, timeout=3)
+
+
+def executar(gesto, gestos, painel):
     acao = gestos.get(gesto)
+    rotulo = (acao or {}).get("rotulo") or gesto.replace("_", " ")
+    if painel:
+        painel.atualizar(gesto=rotulo + ("" if acao else "  (sem ação)"))
     if not acao:
         return
     print(f"[gesto] {gesto} → {acao['comando']}", flush=True)
     subprocess.Popen(acao["comando"], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if avisar and acao.get("rotulo"):
-        notificar(acao["rotulo"])
 
 
 def main() -> None:
@@ -92,7 +134,8 @@ def main() -> None:
         rolar_zona_morta=ajustes.get("rolar_zona_morta", 0.04),
         rolar_velocidade=ajustes.get("rolar_velocidade", 4.5),
     )
-    avisar = ajustes.get("notificar", True) and not args.simular
+    painel = Painel() if ajustes.get("notificar", True) and not args.simular else None
+    pose_painel = object()
     inicio = time.monotonic()
     ultimo_ts = -1
     pose_anterior = None
@@ -125,7 +168,10 @@ def main() -> None:
                 if args.simular:
                     print(f"[gesto] {gesto}", flush=True)
                 else:
-                    executar(gesto, gestos, avisar)
+                    executar(gesto, gestos, painel)
+            if painel and reconhecedor._pose != pose_painel:
+                pose_painel = reconhecedor._pose
+                painel.atualizar(pose=pose_painel)
 
             if args.debug:
                 quadros += 1
@@ -140,5 +186,7 @@ def main() -> None:
     finally:
         if gravacao:
             gravacao.close()
+        if painel:
+            painel.fechar()
         captura.release()
         detector.close()
