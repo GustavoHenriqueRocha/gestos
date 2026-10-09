@@ -74,7 +74,7 @@ class ClassificadorPoses:
 
 # ---------------------------------------------------------------- gravação
 
-def gravar(segundos=12):
+def gravar(segundos=12, so=None):
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
     import cv2
     import mediapipe as mp
@@ -101,6 +101,8 @@ def gravar(segundos=12):
     ts_ant = -1
     etapas = [("prep", "Treino: siga as instrucoes. Feche a janela p/ cancelar.", 4)]
     for classe, texto in CLASSES:
+        if so and classe not in so:
+            continue
         etapas += [("prep", "PROXIMA: " + texto, 3), (classe, texto, segundos)]
     try:
         for classe, texto, duracao in etapas:
@@ -207,5 +209,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("acao", nargs="?", default="treinar", choices=["gravar", "treinar"])
     parser.add_argument("--segundos", type=float, default=12)
+    parser.add_argument("--so", nargs="+", metavar="POSE", help="grava só estas poses (ex.: --so point_right)")
     args = parser.parse_args()
-    gravar(args.segundos) if args.acao == "gravar" else treinar()
+    gravar(args.segundos, args.so) if args.acao == "gravar" else treinar()
